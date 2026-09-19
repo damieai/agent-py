@@ -29,10 +29,10 @@ def validate_patch(workspace: Path, edits: list[FileEdit]) -> list[tuple[Path, b
             or not relative.parts
             or relative.parts[0] != "src"
             or relative.suffix != ".py"
-            or edit.path in seen
+            or relative.as_posix() in seen
         ):
             raise DomainError("PATCH_SCOPE", "Only unique source Python files may be edited", 403)
-        seen.add(edit.path)
+        seen.add(relative.as_posix())
         path = root / edit.path
         if root not in path.resolve().parents or any(
             p.is_symlink() for p in [path, *path.parents] if p != root

@@ -5,7 +5,7 @@
 | 检查 | 命令 | 结果 |
 |---|---|---|
 | 静态检查及格式 | `make check` | 通过，包含迁移文件 |
-| 默认测试 | `.venv/bin/pytest -q` | 68 通过；2 个基础设施测试默认跳过 |
+| 默认测试 | `.venv/bin/pytest -q` | 79 通过；PostgreSQL、Temporal、Docker 三个基础设施测试默认跳过 |
 | PostgreSQL | `AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q` | 1 通过：迁移、非特权角色 RLS、并发预算 |
 | Temporal | `AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_runtime.py -q` | 2 通过：Outbox 与本地服务工作流 |
 | 前端 | `npm --prefix web run build` | TypeScript 检查与 Vite 构建通过 |
@@ -18,6 +18,8 @@
 企业采集继续新增 8 项测试：摘要去重及构建字段裁剪、四类范围拒绝、读取期间撤权、Deployment 字段裁剪、采集到推理的恢复路径。包含证据不得进入其他任务上下文的断言。SQLite 已进一步升级至 `0005_evidence_task_scope`，schema 检查无差异；原生 PostgreSQL 完整迁移/RLS 测试再次通过。采集和模型仍使用模拟 HTTP，真实企业端到端验收未完成。
 
 生命周期新增 9 项测试：取消不可逆、恢复版本及角色、期限/紧急停用约束、审批过期结束、未确认动作升级去重、恢复 HTTP 接口、阻塞工作流保持活跃、PENDING 首次对账保留计时。真实本地 Temporal 测试增加接管暂停后恢复同一工作流的验证，2 项通过（55.56 秒）；前端恢复按钮构建通过。
+
+沙盒验证新增 11 项已执行测试及 1 项 Docker 选择性测试。已验证五类结果门槛、源快照隔离及清理、符号链接/大小限制、独立 oracle 命令、固定可信进程的输出和超时终止、缺少 Docker 时拒绝降级、补丁路径别名去重。真实容器用例因当前 WSL Docker 不可用而未运行；没有执行模型生成的候选代码。`verify-patch --help` 已通过，镜像和 oracle 仍需运维配置。
 
 测试执行需要本地线程和 socket 权限。当前环境中受限执行会阻塞 TestClient，因此完整套件及基础设施测试在获得执行权限后运行。测试还有两条第三方 Starlette/AnyIO 弃用警告，不影响断言结果。
 

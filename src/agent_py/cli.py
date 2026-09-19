@@ -188,6 +188,27 @@ def collect(task_id: str):
 
 
 @app.command()
+def verify_patch(task_id: str, source: Path, patch_file: Path):
+    """Apply a proposed patch to disposable snapshots and run the configured container oracle."""
+    from pydantic import TypeAdapter
+
+    from agent_py.patches import FileEdit
+    from agent_py.verification import VerificationRunner
+
+    with patch_file.open("rb") as stream:
+        raw = stream.read(2_000_001)
+    if len(raw) > 2_000_000:
+        raise typer.BadParameter("Patch JSON exceeds 2 MB")
+    edits = TypeAdapter(list[FileEdit]).validate_json(raw)
+    result = VerificationRunner(build_service(get_settings())).run(
+        principal(), task_id, source, edits
+    )
+    typer.echo(json.dumps(result))
+    if result["outcome"] != "REGRESSION_FIXED":
+        raise typer.Exit(1)
+
+
+@app.command()
 def analyze(
     task_id: str, input_micro_per_token: int, output_micro_per_token: int, allow_api: bool = False
 ):

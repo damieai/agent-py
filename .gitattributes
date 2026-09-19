@@ -1,0 +1,3 @@
+# Keep source digests and JSON patch fixtures stable across developer platforms.
+*.py text eol=lf
+*.json text eol=lf

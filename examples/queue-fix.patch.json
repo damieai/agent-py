@@ -1,0 +1,7 @@
+[
+  {
+    "path": "src/queue_rules.py",
+    "original_sha256": "c719aee85b60aff4d5ab12c4491b607276c6d12fb0f4c766fee7cb603c3ba36f",
+    "content": "\"\"\"Deliberately defective fixture. An item is overdue at the threshold, inclusive.\"\"\"\n\n\ndef overdue(age_seconds: int, threshold_seconds: int) -> bool:\n    return age_seconds >= threshold_seconds\n"
+  }
+]

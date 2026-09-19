@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     task_queue: str = "agent-py-v1"
     model_id: str = ""
     collection_manifest: Path | None = None
+    sandbox_image: str = ""
+    sandbox_oracle: Path | None = None
+    sandbox_root: Path = Path(".runtime/sandboxes")
     allow_model_api: bool = False
     model_input_micro_per_token: int = 0
     model_output_micro_per_token: int = 0

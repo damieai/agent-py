@@ -101,6 +101,8 @@ agent-py analyze TASK_ID INPUT_MICRO_USD_PER_TOKEN OUTPUT_MICRO_USD_PER_TOKEN --
 
 ## 关键边界
 
+候选补丁的基线/修复对照验证可通过 `agent-py verify-patch` 执行，配置与验收限制见[沙盒验证说明](docs/sandbox-verification.md)。需要可用 Docker 和预置的 digest 镜像，当前环境尚未完成容器验收。
+
 - HTTP 请求、模型推理和业务动作使用不同的身份及幂等记录。
 - UNKNOWN 保留原动作身份，通过独立 Reconciler 查询外部权威状态。
 - 未确认动作超过 15 分钟标记 `MANUAL_REVIEW`，继续对账，不自行判定失败。当前只记录事件和工作台状态，未接入外部值班通知。
