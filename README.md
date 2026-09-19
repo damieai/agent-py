@@ -120,3 +120,7 @@ agent-py analyze TASK_ID INPUT_MICRO_USD_PER_TOKEN OUTPUT_MICRO_USD_PER_TOKEN --
 - 回放没有生产客户端或网络补齐路径；导出包仍需检查业务敏感内容。
 
 更多说明：[实施计划](docs/implementation-plan.md)、[运行手册](docs/runbook.md)、[架构决策](docs/architecture.md)。
+
+## 运行保障
+
+Worker 已接入数据库共享的租户并发上限、FIFO 等待票据和过期租约防护。工作台提供按 operator 当前授权过滤的运行概览；API 和 Worker 提供独立凭证保护的 Prometheus 指标，支持受限字段的本地 OTel trace 导出。配置、监控模板和故障处置见[运行观测说明](docs/operations.md)。真实负载、监控告警送达和跨进程 OTLP 链路仍待验收。

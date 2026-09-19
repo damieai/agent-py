@@ -39,12 +39,59 @@ class Activities:
 
     @activity.defn(name="agent_tick")
     async def tick(self, identity: dict) -> dict:
+        import time
+
+        from agent_py.scheduling import acquire, execution_lease, release
+
+        tenant, task_id = identity["tenant"], identity["task_id"]
+        token, reason = await asyncio.to_thread(acquire, self.service, tenant, task_id)
+        if reason and reason != "CONTROL_ONLY":
+            self.service.telemetry.ticks.labels("deferred").inc()
+            return {"done": False, "wait": reason}
+        context_token = execution_lease.set((tenant, task_id, token) if token else None)
+        started = time.monotonic()
+        abandoned = False
+        try:
+            with self.service.telemetry.span(
+                "worker.tick", **{"task.id": task_id, "tenant.id": tenant}
+            ) as span:
+                result = await self._tick(identity)
+                outcome = (
+                    "done"
+                    if result.get("done")
+                    else "waiting"
+                    if result.get("wait")
+                    else "progress"
+                )
+                span.set_attribute("result", outcome)
+                self.service.telemetry.ticks.labels(outcome).inc()
+                return result
+        except asyncio.CancelledError:
+            abandoned = True  # to_thread may still be running; retain its slot until lease expiry.
+            self.service.telemetry.ticks.labels("abandoned").inc()
+            raise
+        except Exception:
+            self.service.telemetry.ticks.labels("error").inc()
+            raise
+        finally:
+            execution_lease.reset(context_token)
+            self.service.telemetry.tick_duration.observe(time.monotonic() - started)
+            if token and not abandoned:
+                await asyncio.to_thread(release, self.service, tenant, task_id, token)
+
+    async def _tick(self, identity):
         tenant, task_id = identity["tenant"], identity["task_id"]
         try:
             return await asyncio.to_thread(self.harness.tick, tenant, task_id)
         except DomainError as exc:
             with self.service.db.session(tenant) as s:
                 t = tenant_get(s, Task, task_id, tenant, True)
+                from agent_py.scheduling import check_execution_lease
+
+                try:
+                    check_execution_lease(s, t)
+                except DomainError:
+                    return {"done": t.status == "TERMINATED", "wait": "WORKER_LEASE_LOST"}
                 if not t.cancelled and not t.taken_over and t.status != "TERMINATED":
                     if t.status != "WAITING" or t.waiting_reason != exc.code:
                         t.status, t.waiting_reason = "WAITING", exc.code
@@ -71,7 +118,10 @@ async def dispatch_once(service: Service, client, tenant: str):
 
     with service.db.session(tenant) as s:
         rows = s.scalars(
-            select(Outbox).where(Outbox.tenant_id == tenant, Outbox.delivered.is_(False)).limit(100)
+            select(Outbox)
+            .where(Outbox.tenant_id == tenant, Outbox.delivered.is_(False))
+            .order_by(Outbox.created_at, Outbox.id)
+            .limit(20)
         ).all()
     for row in rows:
         try:
@@ -91,24 +141,31 @@ def reconcile_once(service: Service, tenant: str):
     from sqlalchemy import select
 
     with service.db.session(tenant) as s:
-        rows = s.scalars(
-            select(Operation)
-            .where(Operation.tenant_id == tenant, Operation.status.in_(["PENDING", "UNKNOWN"]))
-            .limit(100)
-        ).all()
+        base = select(Operation).where(
+            Operation.tenant_id == tenant, Operation.status.in_(["PENDING", "UNKNOWN"])
+        )
+        cursor = service.reconcile_cursors.get(tenant, "")
+        rows = s.scalars(base.where(Operation.id > cursor).order_by(Operation.id).limit(100)).all()
+        if not rows and cursor:
+            rows = s.scalars(base.order_by(Operation.id).limit(100)).all()
+        service.reconcile_cursors[tenant] = rows[-1].id if rows else ""
     for op in rows:
         try:
             service.reconcile(tenant, op.id)
-        except Exception:
+        except Exception as exc:
             # One unavailable provider must not abandon other reconciliation obligations.
             import logging
 
-            logging.getLogger(__name__).exception("Reconciliation failed for operation %s", op.id)
+            logging.getLogger(__name__).error(
+                "Reconciliation failed for operation %s: %s", op.id, type(exc).__name__
+            )
         finally:
             service.escalate_uncertain(tenant, op.id)
 
 
 async def serve_worker(settings: Settings):
+    from agent_py.metrics_server import start_worker_metrics
+
     service = build_service(settings)
     client = await Client.connect(settings.temporal_address, namespace=settings.temporal_namespace)
     worker = Worker(
@@ -116,19 +173,44 @@ async def serve_worker(settings: Settings):
         task_queue=settings.task_queue,
         workflows=[AgentWorkflow],
         activities=[Activities(service).tick],
-        max_concurrent_activities=8,
+        max_concurrent_activities=settings.worker_activity_limit,
     )
-    await worker.run()
+    metrics_server = start_worker_metrics(service)
+    try:
+        await worker.run()
+    finally:
+        if metrics_server:
+            await asyncio.to_thread(metrics_server.shutdown)
+            metrics_server.server_close()
+        service.telemetry.close()
 
 
 async def serve_dispatcher(settings: Settings, tenants: list[str]):
     service = build_service(settings)
     client = await Client.connect(settings.temporal_address, namespace=settings.temporal_namespace)
-    while True:
-        for tenant in tenants:
-            await dispatch_once(service, client, tenant)
-            await asyncio.to_thread(reconcile_once, service, tenant)
-            from agent_py.webhooks import consume
+    try:
+        while True:
+            await dispatcher_round(service, client, tenants)
+            await asyncio.sleep(2)
+    finally:
+        service.telemetry.close()
 
-            await asyncio.to_thread(consume, service, tenant)
-        await asyncio.sleep(2)
+
+async def dispatcher_round(service, client, tenants):
+    import logging
+
+    from agent_py.webhooks import consume
+
+    for tenant in dict.fromkeys(tenants):
+        for name, action in (
+            ("dispatch", lambda: dispatch_once(service, client, tenant)),
+            ("reconcile", lambda: asyncio.to_thread(reconcile_once, service, tenant)),
+            ("inbox", lambda: asyncio.to_thread(consume, service, tenant)),
+        ):
+            try:
+                await action()
+            except Exception as exc:
+                # Do not log provider response bodies or credentials from exception messages.
+                logging.getLogger(__name__).error(
+                    "Tenant %s stage %s failed: %s", tenant, name, type(exc).__name__
+                )

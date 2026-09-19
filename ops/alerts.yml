@@ -1,0 +1,42 @@
+groups:
+  - name: agent-runtime
+    rules:
+      - alert: AgentUnconfirmedAction
+        expr: max by (tenant) (agent_oldest_unconfirmed_seconds) > 900
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Unconfirmed action in tenant {{ $labels.tenant }}'
+          description: 'Inspect authority reconciliation; do not resubmit with a new identity.'
+      - alert: AgentOutboxBacklog
+        expr: max by (tenant) (agent_outbox_pending) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Workflow start backlog in {{ $labels.tenant }}'
+      - alert: AgentAdmissionBacklog
+        expr: max by (tenant) (agent_admission{state="waiting"}) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Sustained admission backlog in {{ $labels.tenant }}'
+      - alert: AgentAPIErrorRate
+        expr: >-
+          (sum(rate(agent_http_duration_seconds_count{job="agent-api",status=~"5.."}[5m]))
+          / clamp_min(sum(rate(agent_http_duration_seconds_count{job="agent-api"}[5m])), 0.001)) > 0.05
+          and sum(increase(agent_http_duration_seconds_count{job="agent-api"}[5m])) > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'API server error ratio above 5%'
+      - alert: AgentMetricsUnavailable
+        expr: up{job=~"agent-api|agent-worker"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Cannot scrape {{ $labels.job }} at {{ $labels.instance }}'

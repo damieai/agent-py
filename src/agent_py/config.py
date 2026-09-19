@@ -34,8 +34,16 @@ class Settings(BaseSettings):
     webhook_secret: SecretStr = SecretStr("")
     webhook_tenant: str = ""
     daily_budget_micro_usd: int = 20_000_000
-    max_active_per_tenant: int = 8
-    max_queue_per_tenant: int = 100
+    max_active_per_tenant: int = Field(default=8, ge=1, le=128)
+    max_queue_per_tenant: int = Field(default=100, ge=1, le=10000)
+    worker_lease_seconds: int = Field(default=360, ge=330, le=900)
+    worker_activity_limit: int = Field(default=8, ge=1, le=128)
+    metrics_secret: SecretStr = SecretStr("")
+    monitoring_tenants: list[str] = Field(default_factory=list, max_length=100)
+    trace_file: Path | None = None
+    worker_metrics_enabled: bool = False
+    worker_metrics_host: Literal["127.0.0.1", "0.0.0.0"] = "127.0.0.1"
+    worker_metrics_port: int = Field(default=9465, ge=0, le=65535)
 
     @model_validator(mode="after")
     def validate_production(self):

@@ -68,6 +68,10 @@ def validate_parameters(tool: str, p: dict):
 class Service:
     def __init__(self, db: Database, settings: Settings, remote):
         self.db, self.settings, self.remote = db, settings, remote
+        from agent_py.telemetry import Telemetry
+
+        self.telemetry = Telemetry(settings)
+        self.reconcile_cursors: dict[str, str] = {}
 
     def create_task(self, p: Principal, contract: TaskContract, key: str) -> Task:
         if contract.workflow == "repair_candidate" and self.settings.execution_mode != "live":
@@ -101,6 +105,17 @@ class Service:
                     deadline=now() + timedelta(seconds=contract.deadline_seconds),
                 )
                 authorize(s, p, task, "developer" if contract.kind == "repair" else "operator")
+                from agent_py.scheduling import lock_tenant
+
+                lock_tenant(s, p.tenant_id)
+                raced = s.scalar(
+                    select(Task).where(Task.tenant_id == p.tenant_id, Task.request_key == key)
+                )
+                if raced:
+                    authorize(s, p, raced)
+                    if raced.request_digest != digest(body):
+                        raise DomainError("IDEMPOTENCY_CONFLICT", "Concurrent request differs")
+                    return raced
                 queued = s.scalar(
                     select(func.count())
                     .select_from(Task)
@@ -299,6 +314,9 @@ class Service:
             return a
 
     def _executable(self, s, t: Task):
+        from agent_py.scheduling import check_execution_lease
+
+        check_execution_lease(s, t)
         if t.cancelled or t.taken_over or t.status == "TERMINATED":
             raise DomainError("TASK_STOPPED", "Task cannot dispatch new actions")
         if aware(t.deadline) <= now():

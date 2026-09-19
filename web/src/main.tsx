@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
 import { RepairPanel } from './RepairPanel';
+import { OperationsPanel } from './OperationsPanel';
 
 type Operation = {id: string; tool: string; resource: string; status: string; recovery_status: string | null; parameters: unknown; error: string | null};
 type Approval = {id: string; operation_id: string; status: string; payload_digest: string; expires_at: string};
@@ -18,6 +19,7 @@ function App() {
   const [resource, setResource] = useState('demo-service');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showOps, setShowOps] = useState(false);
   const [mode, setMode] = useState('unknown');
   const current = useRef({token, selected});
   current.current = {token, selected};
@@ -68,6 +70,7 @@ function App() {
     <header><div><span className="eyebrow">ENGINEERING / OPERATIONS</span><h1>Agent 工作台</h1><p>从调查证据到受控执行，每一步都有记录。</p></div><span className="mode">{mode === 'simulation' ? '仿真环境 · 无真实变更' : mode}</span></header>
     <section className="access"><label htmlFor="token">访问凭证</label><input id="token" type="password" autoComplete="off" value={token} onChange={e => {setTask(null); setToken(e.target.value);}} placeholder="输入短期 Bearer Token；仅保存在当前页面内存"/><button onClick={() => {setToken(''); setTask(null); setTasks([]);}}>清除</button></section>
     {error && <div role="alert" className="error">{error}</div>}
+    <button disabled={!token} onClick={() => setShowOps(v => !v)}>{showOps ? '收起运行概览' : '查看运行概览'}</button>{showOps && token && <OperationsPanel key={token} token={token}/>}
     <div className="grid"><aside><section className="panel"><h2>新建任务</h2><label htmlFor="kind">任务路径</label><select id="kind" value={kind} onChange={e => setKind(e.target.value)}><option value="repair">研发 · 修复与交付</option><option value="incident">运维 · 调查与恢复</option></select><label htmlFor="workflow">执行范围</label><select id="workflow" value={workflow} disabled={kind !== 'repair' || mode !== 'live'} onChange={e => setWorkflow(e.target.value)}><option value="investigate">调查与人工审阅</option><option value="repair_candidate">生成候选补丁并验证</option></select>{mode === 'live' && <><label htmlFor="resource">授权资源</label><input id="resource" value={resource} onChange={e => setResource(e.target.value)} placeholder="与运维配置的资源名一致"/></>}<label htmlFor="goal">目标</label><textarea id="goal" rows={4} value={goal} onChange={e => setGoal(e.target.value)}/><button className="primary" disabled={!token || busy || goal.length < 5} onClick={() => void create()}>提交任务</button><p className="hint">任务由持久化 Worker 推进。高影响动作等待批准。</p></section>
       <section className="panel"><h2>任务记录 <small>{tasks.length}</small></h2>{tasks.length === 0 && <p className="empty">尚无可访问任务</p>}{tasks.map(t => <button className={`task ${selected === t.id ? 'active' : ''}`} key={t.id} onClick={() => setSelected(t.id)}><span>{t.contract.goal}</span><small>{t.contract.kind} · {t.status}</small></button>)}</section></aside>
       <article className="panel details">{!task ? <div className="empty"><h2>选择一个任务</h2><p>查看执行记录、审批对象与验证产物。</p></div> : <>

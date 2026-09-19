@@ -1,5 +1,8 @@
 import asyncio
+import hmac
 import json
+import time
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, Request
@@ -78,8 +81,38 @@ def create_app(
     )
     service = Service(db, settings, remote)
     store = ArtifactStore(db, settings.artifact_root)
-    app = FastAPI(title="Agent Engineering Workbench", version="0.1.0")
+
+    @asynccontextmanager
+    async def lifespan(app):
+        yield
+        service.telemetry.close()
+
+    app = FastAPI(title="Agent Engineering Workbench", version="0.1.0", lifespan=lifespan)
     app.state.service = service
+
+    @app.middleware("http")
+    async def telemetry(request: Request, call_next):
+        started, status = time.monotonic(), 500
+        with service.telemetry.span("http.request") as span:
+            try:
+                response = await call_next(request)
+                status = response.status_code
+                response.headers["X-Trace-ID"] = format(span.get_span_context().trace_id, "032x")
+                return response
+            finally:
+                route = getattr(request.scope.get("route"), "path", "unmatched")
+                method = (
+                    request.method
+                    if request.method
+                    in {"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"}
+                    else "OTHER"
+                )
+                span.set_attribute("http.method", method)
+                span.set_attribute("http.route", route)
+                span.set_attribute("http.status_code", status)
+                service.telemetry.http.labels(method, route, str(status)).observe(
+                    time.monotonic() - started
+                )
 
     @app.exception_handler(DomainError)
     async def domain_error(request: Request, exc: DomainError):
@@ -93,6 +126,29 @@ def create_app(
         return authenticate(settings, authorization[7:])
 
     Auth = Annotated[Principal, Depends(current)]
+
+    @app.get("/api/v1/ops/summary")
+    def operations_summary(p: Auth):
+        from agent_py.operations import summary
+
+        return JSONResponse(summary(service, p.tenant_id, p), headers={"Cache-Control": "no-store"})
+
+    @app.get("/metrics")
+    def metrics(authorization: Annotated[str | None, Header()] = None):
+        from agent_py.operations import prometheus_snapshot
+
+        secret = settings.metrics_secret.get_secret_value()
+        if len(secret) < 32:
+            raise DomainError("METRICS_DISABLED", "Configure a dedicated metrics credential", 503)
+        if not authorization or not hmac.compare_digest(
+            authorization.encode(), ("Bearer " + secret).encode()
+        ):
+            raise DomainError("FORBIDDEN", "Invalid metrics credential", 403)
+        return Response(
+            prometheus_snapshot(service),
+            media_type="text/plain; version=0.0.4",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get("/health/live")
     def live():

@@ -99,6 +99,38 @@ def test_postgres_migrations_rls_and_concurrent_budget(tmp_path, monkeypatch):
 
         with ThreadPoolExecutor(max_workers=2) as pool:
             assert sum(pool.map(reserve, [1, 2])) == 1
+        from agent_py.operations import summary
+        from agent_py.scheduling import acquire
+
+        service.settings.max_active_per_tenant = 1
+        jobs = [
+            service.create_task(
+                p,
+                TaskContract(kind="repair", project="demo", goal="Concurrent worker admission"),
+                f"job-{i}",
+            )
+            for i in range(4)
+        ]
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            admissions = list(pool.map(lambda job: acquire(service, "one", job.id), jobs))
+        assert sum(bool(token) for token, _ in admissions) == 1
+        other = service.create_task(
+            p.model_copy(update={"tenant_id": "two"}),
+            TaskContract(kind="repair", project="demo", goal="Other tenant capacity"),
+            "other",
+        )
+        assert acquire(service, "two", other.id)[0]
+        with appdb.session("one") as s:
+            assert s.execute(
+                text("SELECT DISTINCT tenant_id FROM work_leases")
+            ).scalars().all() == ["one"]
+            assert s.execute(text("SELECT tenant_id FROM admission_gates")).scalars().all() == [
+                "one"
+            ]
+        snapshot = summary(service, "one", p.model_copy(update={"roles": ["operator"]}))
+        assert snapshot["admission"]["active"] == 1
+        assert snapshot["admission"]["waiting"] == 3
+        assert snapshot["today_reserved_micro_usd"] == 600_000
     finally:
         get_settings.cache_clear()
         if appdb:

@@ -1,0 +1,18 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+rule_files:
+  - alerts.yml
+scrape_configs:
+  - job_name: agent-api
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/agent-metrics-token
+    static_configs:
+      - targets: ['127.0.0.1:8000']
+  - job_name: agent-worker
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/agent-metrics-token
+    static_configs:
+      - targets: ['127.0.0.1:9465']

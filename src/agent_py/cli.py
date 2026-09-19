@@ -123,6 +123,30 @@ def emergency_stop(tenant: str, stopped: bool = True):
 
 
 @app.command()
+def admission_limit(tenant: str, limit: int):
+    """Operator command: set shared concurrency policy without killing current work."""
+    from agent_py.db import AdmissionGate
+    from agent_py.scheduling import lock_tenant
+
+    if not 1 <= limit <= 128:
+        raise typer.BadParameter("Limit must be between 1 and 128")
+    service = build_service(get_settings())
+    with service.db.session(tenant) as s:
+        lock_tenant(s, tenant)
+        s.scalar(select(AdmissionGate).where(AdmissionGate.tenant_id == tenant)).max_active = limit
+    typer.echo("Shared tenant admission limit updated; running leases remain valid.")
+
+
+@app.command()
+def ops_status():
+    """Show grant-scoped operational state for the local demo operator."""
+    from agent_py.operations import summary
+
+    service = build_service(get_settings())
+    typer.echo(json.dumps(summary(service, "demo", principal()), indent=2))
+
+
+@app.command()
 def export(task_id: str, output: Path):
     from agent_py.replay import export_recording
 

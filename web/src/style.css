@@ -2,3 +2,10 @@
 
 .patch-diff { max-height: 32rem; overflow: auto; white-space: pre; }
 .repair-panel { border-top: 1px solid #334155; margin-top: 1.5rem; padding-top: 1rem; }
+
+.ops-panel { margin: 1rem 0; }
+.ops-cards { display: flex; flex-wrap: wrap; gap: 1.5rem; margin: 1rem 0; }
+.ops-cards div { display: flex; flex-direction: column; gap: .4rem; }
+.ops-cards strong { font-size: 1.4rem; }
+.ops-cards span { font-size: .85rem; color: #64748b; }
+.ops-states { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }

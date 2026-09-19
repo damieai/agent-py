@@ -183,6 +183,22 @@ class RepairAttempt(Record):
     verification_count: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class AdmissionGate(Record):
+    __tablename__ = "admission_gates"
+    __table_args__ = (UniqueConstraint("tenant_id"),)
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    max_active: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class WorkLease(Record):
+    __tablename__ = "work_leases"
+    __table_args__ = (UniqueConstraint("tenant_id", "task_id"),)
+    task_id: Mapped[str] = mapped_column(String(36))
+    owner_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    enqueued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
 class Database:
     def __init__(self, url: str):
         if url.startswith("sqlite:///", 0) and ":memory:" not in url:
@@ -247,7 +263,12 @@ def tenant_get(s: Session, model, id: str, tenant: str, lock: bool = False):
 
 
 def emit(s: Session, task: Task, kind: str, payload: dict):
+    from opentelemetry import trace
     from sqlalchemy import update
+
+    span = trace.get_current_span().get_span_context()
+    if span.is_valid:
+        payload = {**payload, "trace_id": format(span.trace_id, "032x")}
 
     seq = s.scalar(
         update(Task)
