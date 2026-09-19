@@ -2,9 +2,11 @@
 
 import json
 
+from sqlalchemy import select
+
 from agent_py.artifacts import ArtifactStore
 from agent_py.context import ContextCompiler
-from agent_py.db import Task, emit, tenant_get
+from agent_py.db import Reservation, Task, emit, tenant_get
 from agent_py.domain import DomainError, Principal
 from agent_py.model import AnthropicGateway
 
@@ -38,8 +40,27 @@ class InvestigationHarness:
             environments=[contract["environment"]],
         )
         compiler = ContextCompiler(service.db)
+        if service.settings.collection_manifest is not None:
+            from agent_py.collection import CollectionManifest, EvidenceCollector
+
+            with service.db.session(tenant) as s:
+                started = s.scalar(
+                    select(Reservation.id).where(
+                        Reservation.tenant_id == tenant,
+                        Reservation.task_id == task_id,
+                        Reservation.call_key == "investigation:v1",
+                    )
+                )
+            if not started:
+                EvidenceCollector(
+                    service, CollectionManifest.load(service.settings.collection_manifest)
+                ).collect(principal, task_id)
         bundle = compiler.compile(
-            principal, contract["project"], contract["environment"], contract["goal"]
+            principal,
+            contract["project"],
+            contract["environment"],
+            contract["goal"],
+            task_id=task_id,
         )
         if not bundle.documents:
             with service.db.session(tenant) as s:
@@ -56,7 +77,9 @@ class InvestigationHarness:
         decision = gateway.decide(
             tenant, task_id, "investigation:v1", contract["goal"], bundle.as_dict()
         )
-        compiler.validate(principal, contract["project"], contract["environment"], bundle)
+        compiler.validate(
+            principal, contract["project"], contract["environment"], bundle, task_id=task_id
+        )
         report = {
             "context": bundle.as_dict(),
             "decision": decision.model_dump(),

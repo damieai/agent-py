@@ -5,7 +5,7 @@
 | 检查 | 命令 | 结果 |
 |---|---|---|
 | 静态检查及格式 | `make check` | 通过，包含迁移文件 |
-| 默认测试 | `.venv/bin/pytest -q` | 51 通过；2 个基础设施测试默认跳过 |
+| 默认测试 | `.venv/bin/pytest -q` | 59 通过；2 个基础设施测试默认跳过 |
 | PostgreSQL | `AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q` | 1 通过：迁移、非特权角色 RLS、并发预算 |
 | Temporal | `AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_runtime.py -q` | 2 通过：Outbox 与本地服务工作流 |
 | 前端 | `npm --prefix web run build` | TypeScript 检查与 Vite 构建通过 |
@@ -14,6 +14,8 @@
 默认测试包括响应丢失后对账、重复派发、取消、审批过期及撤销、跨租户访问、并发审批、重复预算结算、未知回执、严格回放与文件路径边界。确认成功的动作不接受迟到失败覆盖；缺少确认标记的回执保留为 UNKNOWN。
 
 只读调查新增 6 项测试：推理后产物写入失败恢复且仅请求一次、响应丢失不重复付费请求、上下文变化拒绝重用推理身份、显式开启及证据门槛、推理期间撤销证据后阻止发布、Worker 路由到只读调查。模型响应使用 HTTP Mock，没有付费模型质量结论。SQLite 已升级至 `0004_inference_result`，Alembic schema 检查无差异；PostgreSQL 和 Temporal 集成测试在本轮修改后再次通过。
+
+企业采集继续新增 8 项测试：摘要去重及构建字段裁剪、四类范围拒绝、读取期间撤权、Deployment 字段裁剪、采集到推理的恢复路径。包含证据不得进入其他任务上下文的断言。SQLite 已进一步升级至 `0005_evidence_task_scope`，schema 检查无差异；原生 PostgreSQL 完整迁移/RLS 测试再次通过。采集和模型仍使用模拟 HTTP，真实企业端到端验收未完成。
 
 测试执行需要本地线程和 socket 权限。当前环境中受限执行会阻塞 TestClient，因此完整套件及基础设施测试在获得执行权限后运行。测试还有两条第三方 Starlette/AnyIO 弃用警告，不影响断言结果。
 

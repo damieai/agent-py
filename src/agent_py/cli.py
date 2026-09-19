@@ -160,6 +160,7 @@ def ingest(task_id: str, file: Path):
     with service.db.session(p.tenant_id) as s:
         d = Document(
             tenant_id=p.tenant_id,
+            task_id=task_id,
             project=t.contract["project"],
             source="upload://" + file.name,
             version=digest(body),
@@ -170,6 +171,20 @@ def ingest(task_id: str, file: Path):
         s.add(d)
         s.flush()
         typer.echo(d.id)
+
+
+@app.command()
+def collect(task_id: str):
+    """Read scoped sources from the operator's configured manifest into evidence storage."""
+    from agent_py.collection import CollectionManifest, EvidenceCollector
+
+    service = build_service(get_settings())
+    if service.settings.collection_manifest is None:
+        raise typer.BadParameter("Set AGENT_COLLECTION_MANIFEST to an operator-owned JSON file")
+    collector = EvidenceCollector(
+        service, CollectionManifest.load(service.settings.collection_manifest)
+    )
+    typer.echo(json.dumps(collector.collect(principal(), task_id)))
 
 
 @app.command()
@@ -189,14 +204,14 @@ def analyze(
     t = service.get_task(p, task_id)
     compiler = ContextCompiler(service.db)
     bundle = compiler.compile(
-        p, t.contract["project"], t.contract["environment"], t.contract["goal"]
+        p, t.contract["project"], t.contract["environment"], t.contract["goal"], task_id=task_id
     )
     if not bundle.documents:
         raise typer.BadParameter("Import authorized evidence before requesting model analysis")
     decision = AnthropicGateway(
         service.settings, service, input_micro_per_token, output_micro_per_token
     ).decide(p.tenant_id, t.id, uid(), t.contract["goal"], bundle.as_dict())
-    compiler.validate(p, t.contract["project"], t.contract["environment"], bundle)
+    compiler.validate(p, t.contract["project"], t.contract["environment"], bundle, task_id=task_id)
     data = {
         "context": bundle.as_dict(),
         "decision": decision.model_dump(),

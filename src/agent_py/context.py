@@ -4,9 +4,9 @@ from datetime import datetime
 
 from sqlalchemy import or_, select
 
-from agent_py.db import Document, now
+from agent_py.db import Document, Task, now, tenant_get
 from agent_py.domain import DomainError, Principal, digest
-from agent_py.security import check_grant
+from agent_py.security import authorize, check_grant
 
 
 def terms(text: str) -> set[str]:
@@ -31,6 +31,14 @@ class ContextCompiler:
     def __init__(self, db):
         self.db = db
 
+    def _scope(self, s, principal, project, environment, task_id):
+        check_grant(s, principal.tenant_id, principal.subject, project, environment)
+        if task_id is not None:
+            task = tenant_get(s, Task, task_id, principal.tenant_id)
+            authorize(s, principal, task)
+            if task.contract["project"] != project or task.contract["environment"] != environment:
+                raise DomainError("CONTEXT_SCOPE", "Context does not match task scope", 403)
+
     def compile(
         self,
         principal: Principal,
@@ -39,6 +47,7 @@ class ContextCompiler:
         query: str,
         budget: int = 6000,
         as_of: datetime | None = None,
+        task_id: str | None = None,
     ) -> ContextBundle:
         if budget < 1 or budget > 100_000:
             raise DomainError("CONTEXT_BUDGET", "Invalid context budget", 422)
@@ -46,11 +55,12 @@ class ContextCompiler:
             raise DomainError("FORBIDDEN", "Context outside principal scope", 403)
         when = as_of or now()
         with self.db.session(principal.tenant_id) as s:
-            check_grant(s, principal.tenant_id, principal.subject, project, environment)
+            self._scope(s, principal, project, environment, task_id)
             docs = s.scalars(
                 select(Document).where(
                     Document.tenant_id == principal.tenant_id,
                     Document.project == project,
+                    or_(Document.task_id.is_(None), Document.task_id == task_id),
                     Document.revoked.is_(False),
                     Document.valid_from <= when,
                     or_(Document.valid_until.is_(None), Document.valid_until > when),
@@ -80,15 +90,23 @@ class ContextCompiler:
             included.append(entry)
         return ContextBundle(included, omitted, used, digest(included))
 
-    def validate(self, principal: Principal, project: str, environment: str, bundle: ContextBundle):
+    def validate(
+        self,
+        principal: Principal,
+        project: str,
+        environment: str,
+        bundle: ContextBundle,
+        task_id: str | None = None,
+    ):
         with self.db.session(principal.tenant_id) as s:
-            check_grant(s, principal.tenant_id, principal.subject, project, environment)
+            self._scope(s, principal, project, environment, task_id)
             for item in bundle.documents:
                 d = s.scalar(
                     select(Document).where(
                         Document.id == item["id"],
                         Document.tenant_id == principal.tenant_id,
                         Document.project == project,
+                        or_(Document.task_id.is_(None), Document.task_id == task_id),
                         Document.version == item["version"],
                         Document.revoked.is_(False),
                         Document.valid_from <= now(),

@@ -144,6 +144,7 @@ class Policy(Record):
 
 class Document(Record):
     __tablename__ = "documents"
+    task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     project: Mapped[str] = mapped_column(String(80), index=True)
     source: Mapped[str] = mapped_column(String(300))
     version: Mapped[str] = mapped_column(String(160))

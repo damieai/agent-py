@@ -1,0 +1,17 @@
+{
+  "sources": [
+    {
+      "name": "queue-issue",
+      "tenant": "demo",
+      "project": "demo",
+      "environment": "lab",
+      "resource": "demo-service",
+      "subjects": ["developer"],
+      "provider": "jira_issue",
+      "base_url": "https://your-site.atlassian.net/rest/api/3/",
+      "token_env": "AGENT_JIRA_TOKEN",
+      "username_env": "AGENT_JIRA_EMAIL",
+      "parameters": {"key": "DEMO-1"}
+    }
+  ]
+}

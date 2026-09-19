@@ -91,7 +91,13 @@ agent-py analyze TASK_ID INPUT_MICRO_USD_PER_TOKEN OUTPUT_MICRO_USD_PER_TOKEN --
 
 也可让 Worker 执行持久化只读分析：先运行 `make migrate`，配置 `AGENT_EXECUTION_MODE=live`、`AGENT_ALLOW_MODEL_API=true`，并将 `AGENT_MODEL_INPUT_MICRO_PER_TOKEN` 和 `AGENT_MODEL_OUTPUT_MICRO_PER_TOKEN` 设置为实际正数费用。未显式开启时不会发起模型请求。创建任务并用 `ingest` 导入证据后，由 Worker 或 `agent-py tick TASK_ID` 推进。
 
-该路径使用导入证据，不会自动抓取企业数据。没有匹配证据时等待 `EVIDENCE_REQUIRED`；分析后保存产物并停在 `HUMAN_REVIEW`，不宣称修复成功。已校验的模型决策与费用同事务保存，产物写入失败后可恢复而不再次推理；响应丢失则保守记账并停止自动重试。相同推理身份下证据或请求发生变化会拒绝重用，需要新任务重新分析。
+默认使用导入证据；配置采集清单后，Worker 在首次推理前读取清单内的企业资源。没有匹配证据时等待 `EVIDENCE_REQUIRED`；分析后保存产物并停在 `HUMAN_REVIEW`，不宣称修复成功。已校验的模型决策与费用同事务保存，产物写入失败后可恢复而不再次推理；响应丢失则保守记账并停止自动重试。相同推理身份下证据或请求发生变化会拒绝重用，需要新任务重新分析。
+
+采集配置参考 [collection-manifest.json](examples/collection-manifest.json)。将实际配置保存到运维控制的文件，通过 `AGENT_COLLECTION_MANIFEST` 指定路径，并在进程环境中设置 `token_env` / `username_env` 引用的凭证变量。凭证变量需要由 shell 或 Secret 管理器注入，任意连接器变量不会自动从 `.env` 加载。可先运行 `agent-py collect TASK_ID` 单独采集，无需开启模型付费请求。
+
+每条来源必须匹配租户、项目、环境、资源及主体。支持 `bitbucket_pr(workspace, repo, pr)`、`jira_issue(key)`、`jenkins_build(job, build)`、`kubernetes_deployment(namespace, name)`；`parameters` 填写对应参数。地址沿用企业读取适配器的 HTTPS、固定前缀及禁止重定向限制。清单只能由运维配置，不接受模型修改。
+
+新导入与采集的证据绑定任务；未变化的采集内容按摘要去重。旧版本未绑定任务的文档仍按原项目 ACL 共享，迁移不会自动猜测其归属。采集省略构建参数及 Pod 配置，但工单与 PR 正文仍可能包含业务敏感信息，需要按企业出站规则选择来源。真实账号联调尚未完成。
 
 ## 关键边界
 

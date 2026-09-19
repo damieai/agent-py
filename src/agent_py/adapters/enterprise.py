@@ -13,7 +13,14 @@ from agent_py.domain import DomainError
 class EnterpriseClient:
     def __init__(self, base_url: str, token: str, *, transport=None, username: str | None = None):
         parsed = urlsplit(base_url)
-        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        if (
+            parsed.scheme != "https"
+            or not parsed.hostname
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
             raise ValueError("An explicitly configured HTTPS service origin is required")
         self.base = base_url.rstrip("/") + "/"
         self.origin = (parsed.scheme, parsed.netloc)
