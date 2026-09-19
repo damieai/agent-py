@@ -54,7 +54,9 @@ def response():
     )
 
 
-def test_crash_after_inference_recovers_without_second_request(env, task, monkeypatch):
+@pytest.mark.parametrize("strategy", ["lexical", "bm25_rrf"])
+def test_crash_after_inference_recovers_without_second_request(env, task, monkeypatch, strategy):
+    env[0].settings.context_strategy = strategy
     calls = []
     harness = setup(env, lambda request: calls.append(request) or response())
     original = ArtifactStore.put
@@ -121,6 +123,36 @@ def test_evidence_revoked_during_inference_blocks_publication(env, task):
         harness.tick("t1", task.id)
     with env[0].db.session("t1") as s:
         assert s.scalar(select(func.count()).select_from(Artifact)) == 0
+
+
+def test_revoke_after_compile_blocks_outbound_inference(env, task, monkeypatch):
+    from agent_py.context import ContextCompiler
+
+    calls = []
+    harness = setup(env, lambda request: calls.append(request) or response())
+    env[0].settings.context_strategy = "bm25_rrf"
+    original = ContextCompiler.compile
+
+    def revoke(*args, **kwargs):
+        bundle = original(*args, **kwargs)
+        with env[0].db.session("t1") as s:
+            s.get(Document, "e1").revoked = True
+        return bundle
+
+    monkeypatch.setattr(ContextCompiler, "compile", revoke)
+    with pytest.raises(DomainError, match="revoked"):
+        harness.tick("t1", task.id)
+    assert calls == []
+
+
+def test_strategy_switch_does_not_repeat_paid_request(env, task):
+    calls = []
+    harness = setup(env, lambda request: calls.append(request) or response())
+    harness.tick("t1", task.id)
+    env[0].settings.context_strategy = "bm25_rrf"
+    with pytest.raises(DomainError, match="changed"):
+        harness.tick("t1", task.id)
+    assert len(calls) == 1
 
 
 def test_runtime_selects_readonly_harness(env, task):

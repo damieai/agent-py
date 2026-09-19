@@ -1,0 +1,164 @@
+{
+  "name": "authored-retrieval-development-v1",
+  "documents": [
+    {
+      "id": "lease",
+      "source": "runbook://worker/leases",
+      "body": "Expired worker leases reject future dispatch. Cancellation retains the slot because a background thread can still run. Never assume an expired token cancels a remote call."
+    },
+    {
+      "id": "budget",
+      "source": "runbook://model/budget",
+      "body": "Unknown inference responses keep the original reservation. Reconcile provider billing before releasing reserved micro USD. Do not retry an ambiguous paid request."
+    },
+    {
+      "id": "rls",
+      "source": "runbook://postgres/tenant-isolation",
+      "body": "FORCE ROW LEVEL SECURITY prevents tenant leaks. Application roles must not own tables or use BYPASSRLS. Set the tenant transaction variable before querying."
+    },
+    {
+      "id": "ci",
+      "source": "jenkins://build/17",
+      "body": "Build 17 failed because the application returned HTTP 503. The verified deployment digest is sha256:abc. A later successful build does not change this failure."
+    },
+    {
+      "id": "rollback",
+      "source": "runbook://deployment/rollback",
+      "body": "Rollback requires approval of the exact resource version and image digest. Check Kubernetes object UID, health window and schema compatibility before reverting."
+    },
+    {
+      "id": "queue-cn",
+      "source": "runbook://queue/capacity",
+      "body": "队列积压时检查消费者容量与租户并发上限。持续等待并不代表消息丢失。确认下游健康后逐步增加消费者。"
+    },
+    {
+      "id": "approval",
+      "source": "runbook://security/approval",
+      "body": "Approval is bound to the action payload digest and expires at a fixed deadline. A revoked resource grant blocks dispatch even with an old approved decision."
+    },
+    {
+      "id": "webhook",
+      "source": "runbook://connector/webhook",
+      "body": "Webhook HMAC signatures and timestamp windows guard ingestion. Inbox deduplicates delivery IDs. A notification triggers authoritative reconciliation, never direct success."
+    },
+    {
+      "id": "sse",
+      "source": "runbook://workbench/events",
+      "body": "SSE resumes from the last event sequence. The server rechecks grants while streaming. HTTP header latency is not the duration of the entire event stream."
+    },
+    {
+      "id": "cache",
+      "source": "repo://demo/src/cache.py",
+      "body": "def invalidateCache(key):\n    \"\"\"Remove a cached entry after a source version update.\"\"\"\n    return key\n"
+    },
+    {
+      "id": "refund",
+      "source": "repo://demo/src/refund.py",
+      "body": "def unrelated():\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    # configuration reference without payment logic\n    return None\n\ndef calculate_refund(amount, fee):\n    \"\"\"Refund subtracts a processing fee exactly once.\"\"\"\n    return max(0, amount - fee)\n"
+    },
+    {
+      "id": "noise",
+      "source": "notes://weekly",
+      "body": "Routine meeting about office printers, holiday schedules and lunch orders."
+    }
+  ],
+  "queries": [
+    {
+      "id": "token",
+      "query": "expired worker token dispatch",
+      "relevant": [
+        "lease"
+      ],
+      "budget": 1700
+    },
+    {
+      "id": "money",
+      "query": "unknown paid inference reserved budget",
+      "relevant": [
+        "budget"
+      ],
+      "budget": 1700
+    },
+    {
+      "id": "tenant",
+      "query": "BYPASSRLS table owner",
+      "relevant": [
+        "rls"
+      ],
+      "budget": 1700
+    },
+    {
+      "id": "build",
+      "query": "HTTP 503 Build 17",
+      "relevant": [
+        "ci"
+      ],
+      "budget": 1700
+    },
+    {
+      "id": "deploy",
+      "query": "Kubernetes rollback approval",
+      "relevant": [
+        "rollback",
+        "approval"
+      ],
+      "budget": 2800
+    },
+    {
+      "id": "chinese",
+      "query": "队列积压消费者容量",
+      "relevant": [
+        "queue-cn"
+      ],
+      "budget": 1700
+    },
+    {
+      "id": "auth",
+      "query": "revoked grant approved digest",
+      "relevant": [
+        "approval"
+      ],
+      "budget": 1700
+    },
+    {
+      "id": "hook",
+      "query": "HMAC delivery notification",
+      "relevant": [
+        "webhook"
+      ],
+      "budget": 1700
+    },
+    {
+      "id": "stream",
+      "query": "SSE event sequence",
+      "relevant": [
+        "sse"
+      ],
+      "budget": 1700
+    },
+    {
+      "id": "symbol",
+      "query": "invalidate cache",
+      "relevant": [
+        "cache"
+      ],
+      "budget": 1700
+    },
+    {
+      "id": "long-code",
+      "query": "calculate refund processing fee",
+      "relevant": [
+        "refund"
+      ],
+      "budget": 1700
+    },
+    {
+      "id": "source",
+      "query": "tenant-isolation",
+      "relevant": [
+        "rls"
+      ],
+      "budget": 1700
+    }
+  ]
+}

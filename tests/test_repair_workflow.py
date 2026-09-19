@@ -123,9 +123,27 @@ def advance_to_patch(fixture):
     return repair_details(service, principal, task.id)["attempts"][0]
 
 
-def test_complete_candidate_review_loop_does_not_execute_business_actions(repair_env):
+@pytest.mark.parametrize("strategy", ["lexical", "bm25_rrf"])
+def test_complete_candidate_review_loop_does_not_execute_business_actions(repair_env, strategy):
     service, principal, task, harness, _, model, containers, source = repair_env
+    from agent_py.db import Document
+
+    service.settings.context_strategy = strategy
+    with service.db.session("t1") as s:
+        s.add(
+            Document(
+                tenant_id="t1",
+                task_id=task.id,
+                project="demo",
+                source="repo://demo/info.py",
+                version="1",
+                body="def boundary_regression():\n    return 1\n",
+                allowed_subjects=[principal.subject],
+            )
+        )
     advance_to_patch(repair_env)
+    # Persisted contexts are validated by their recorded policy after a deployment switch.
+    service.settings.context_strategy = "lexical"
     assert harness.tick("t1", task.id)["wait"] == "CANDIDATE_READY_FOR_REVIEW"
     assert harness.tick("t1", task.id)["wait"] == "CANDIDATE_READY_FOR_REVIEW"
     details = repair_details(service, principal, task.id)
@@ -426,6 +444,21 @@ def test_temporal_advances_entire_repair_loop_and_cancels_review(repair_env):
     from agent_py.runtime import Activities, AgentWorkflow
 
     service, principal, task, harness, _, model, containers, _ = repair_env
+    from agent_py.db import Document
+
+    service.settings.context_strategy = "bm25_rrf"
+    with service.db.session("t1") as s:
+        s.add(
+            Document(
+                tenant_id="t1",
+                task_id=task.id,
+                project="demo",
+                source="runbook://boundary",
+                version="v1",
+                body="Fix boundary regression",
+                allowed_subjects=["u1"],
+            )
+        )
 
     async def scenario():
         async with await WorkflowEnvironment.start_local() as runtime:

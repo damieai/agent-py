@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 import { RepairPanel } from './RepairPanel';
 import { OperationsPanel } from './OperationsPanel';
+import { ContextPanel } from './ContextPanel';
 
 type Operation = {id: string; tool: string; resource: string; status: string; recovery_status: string | null; parameters: unknown; error: string | null};
 type Approval = {id: string; operation_id: string; status: string; payload_digest: string; expires_at: string};
@@ -79,7 +80,7 @@ function App() {
         {task.contract.workflow === 'repair_candidate' && <RepairPanel key={`${task.id}:${token}`} taskId={task.id} token={token}/> }
         <h3>待审批动作</h3>{!task.approvals?.some(a => a.status === 'PENDING') && <p className="hint">当前没有待审批动作。批准需要 reviewer 权限。</p>}{task.approvals?.filter(a => a.status === 'PENDING').map(a => {const op = task.operations?.find(o => o.id === a.operation_id); return <section className="approval" key={a.id}><strong>{op?.tool} · {op?.resource}</strong><pre>{JSON.stringify(op?.parameters, null, 2)}</pre><small>批准仅适用于这些参数与版本；有效期至 {a.expires_at}</small><div className="actions">{(['approve', 'reject'] as const).map(d => <button disabled={busy} key={d} onClick={() => void mutate(async () => {await request(`/api/v1/approvals/${a.id}/decisions`, 'POST', {decision: d, expected_digest: a.payload_digest});})}>{d === 'approve' ? '批准此动作' : '拒绝'}</button>)}</div></section>;})}
         <h3>动作与确认结果</h3><div className="timeline">{task.operations?.map(o => <div className="operation" key={o.id}><div><strong>{o.tool}</strong><span className="badge">{o.status}</span></div><small className="mono">{o.id}</small>{o.recovery_status && <p>恢复：{o.recovery_status}</p>}{o.error && <p className="error-text">{o.error}</p>}<details><summary>查看参数</summary><pre>{JSON.stringify(o.parameters, null, 2)}</pre></details></div>)}</div>
-        <h3>证据与产物</h3>{task.artifacts?.map(a => <button className="artifact" key={a.id} onClick={() => void artifact(a.id)}>{a.kind} <small>SHA256 {a.digest.slice(0, 12)}…</small></button>)}
+        <h3>证据与产物</h3><ContextPanel key={`${task.id}:${token}`} taskId={task.id} token={token}/>{task.artifacts?.map(a => <button className="artifact" key={a.id} onClick={() => void artifact(a.id)}>{a.kind} <small>SHA256 {a.digest.slice(0, 12)}…</small></button>)}
       </>}</article></div>
     <footer>仿真结果不等于真实生产验证。UNKNOWN 表示结果尚未确认，不能视为失败后重做。</footer>
   </main>;

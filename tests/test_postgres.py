@@ -131,6 +131,26 @@ def test_postgres_migrations_rls_and_concurrent_budget(tmp_path, monkeypatch):
         assert snapshot["admission"]["active"] == 1
         assert snapshot["admission"]["waiting"] == 3
         assert snapshot["today_reserved_micro_usd"] == 600_000
+        from agent_py.context import ContextCompiler
+        from agent_py.db import Document
+
+        for tenant in ("one", "two"):
+            with appdb.session(tenant) as s:
+                s.add(
+                    Document(
+                        tenant_id=tenant,
+                        project="demo",
+                        source="repo://demo/queue.py",
+                        version="v1",
+                        body="def worker_capacity():\n    return 8\n",
+                        allowed_subjects=["actor"],
+                    )
+                )
+        compiler = ContextCompiler(appdb, "bm25_rrf")
+        bundle = compiler.compile(p, "demo", "lab", "worker capacity", task_id=task.id)
+        assert len(bundle.documents) == 1
+        assert bundle.documents[0]["symbol"] == "worker_capacity"
+        compiler.validate(p, "demo", "lab", bundle, task_id=task.id)
     finally:
         get_settings.cache_clear()
         if appdb:

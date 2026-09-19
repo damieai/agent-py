@@ -44,7 +44,7 @@ class InvestigationHarness:
             projects=[contract["project"]],
             environments=[contract["environment"]],
         )
-        compiler = ContextCompiler(service.db)
+        compiler = ContextCompiler(service.db, service.settings.context_strategy)
         if service.settings.collection_manifest is not None:
             from agent_py.collection import CollectionManifest, EvidenceCollector
 
@@ -78,6 +78,9 @@ class InvestigationHarness:
             service,
             service.settings.model_input_micro_per_token,
             service.settings.model_output_micro_per_token,
+        )
+        compiler.validate(
+            principal, contract["project"], contract["environment"], bundle, task_id=task_id
         )
         decision = gateway.decide(
             tenant, task_id, "investigation:v1", contract["goal"], bundle.as_dict()

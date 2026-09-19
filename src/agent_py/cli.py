@@ -198,6 +198,40 @@ def ingest(task_id: str, file: Path):
 
 
 @app.command()
+def evaluate_retrieval(dataset: Path, output: Path = Path(".runtime/retrieval-evaluation.json")):
+    """Compare retrieval strategies in a disposable database, without model or network calls."""
+    from agent_py.retrieval_evaluation import evaluate_retrieval as run
+
+    report = run(dataset, output)
+    for result in report["results"]:
+        typer.echo(
+            f"{result['strategy']}: recall={result['mean_recall']:.3f}, MRR={result['mrr']:.3f}"
+        )
+    typer.echo(f"Authored retrieval fixtures only; report: {output}")
+
+
+@app.command()
+def context_preview(task_id: str, query: str | None = None, budget: int = 6000):
+    """Preview authorized evidence without calling a model or modifying a task."""
+    from agent_py.context import ContextCompiler
+
+    service = build_service(get_settings())
+    p = principal()
+    t = service.get_task(p, task_id)
+    compiler = ContextCompiler(service.db, service.settings.context_strategy)
+    bundle = compiler.compile(
+        p,
+        t.contract["project"],
+        t.contract["environment"],
+        query if query is not None else t.contract["goal"],
+        budget=budget,
+        task_id=task_id,
+    )
+    compiler.validate(p, t.contract["project"], t.contract["environment"], bundle, task_id=task_id)
+    typer.echo(json.dumps(bundle.as_dict(), ensure_ascii=False, indent=2))
+
+
+@app.command()
 def collect(task_id: str):
     """Read scoped sources from the operator's configured manifest into evidence storage."""
     from agent_py.collection import CollectionManifest, EvidenceCollector
@@ -270,12 +304,13 @@ def analyze(
     service = build_service(get_settings())
     p = principal()
     t = service.get_task(p, task_id)
-    compiler = ContextCompiler(service.db)
+    compiler = ContextCompiler(service.db, service.settings.context_strategy)
     bundle = compiler.compile(
         p, t.contract["project"], t.contract["environment"], t.contract["goal"], task_id=task_id
     )
     if not bundle.documents:
         raise typer.BadParameter("Import authorized evidence before requesting model analysis")
+    compiler.validate(p, t.contract["project"], t.contract["environment"], bundle, task_id=task_id)
     decision = AnthropicGateway(
         service.settings, service, input_micro_per_token, output_micro_per_token
     ).decide(p.tenant_id, t.id, uid(), t.contract["goal"], bundle.as_dict())

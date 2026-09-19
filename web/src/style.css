@@ -9,3 +9,9 @@
 .ops-cards strong { font-size: 1.4rem; }
 .ops-cards span { font-size: .85rem; color: #64748b; }
 .ops-states { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+.context-panel { margin: 12px 0; padding: 16px; border: 1px solid #dce4e7; border-radius: 10px; }
+.context-panel summary { cursor: pointer; overflow-wrap: anywhere; }
+.context-panel input { display: block; width: 100%; margin: 6px 0 12px; }
+.context-panel .evidence { margin: 12px 0; padding: 12px; background: #f5f8f9; border-radius: 8px; }
+.context-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; }
+.context-panel .mono { overflow-wrap: anywhere; }

@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     metrics_secret: SecretStr = SecretStr("")
     monitoring_tenants: list[str] = Field(default_factory=list, max_length=100)
     trace_file: Path | None = None
+    context_strategy: Literal["lexical", "bm25_rrf"] = "lexical"
     worker_metrics_enabled: bool = False
     worker_metrics_host: Literal["127.0.0.1", "0.0.0.0"] = "127.0.0.1"
     worker_metrics_port: int = Field(default=9465, ge=0, le=65535)

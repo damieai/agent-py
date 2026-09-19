@@ -124,3 +124,7 @@ agent-py analyze TASK_ID INPUT_MICRO_USD_PER_TOKEN OUTPUT_MICRO_USD_PER_TOKEN --
 ## 运行保障
 
 Worker 已接入数据库共享的租户并发上限、FIFO 等待票据和过期租约防护。工作台提供按 operator 当前授权过滤的运行概览；API 和 Worker 提供独立凭证保护的 Prometheus 指标，支持受限字段的本地 OTel trace 导出。配置、监控模板和故障处置见[运行观测说明](docs/operations.md)。真实负载、监控告警送达和跨进程 OTLP 链路仍待验收。
+
+## 证据检索与预览
+
+可通过 `AGENT_CONTEXT_STRATEGY=bm25_rrf` 启用 Python 结构分块、BM25 与来源匹配融合排序，保留原文摘要及行号，调用前后复核权限与版本。默认策略仍为 lexical。工作台提供只读证据预览；`agent-py evaluate-retrieval examples/retrieval-development.json` 可在临时数据库比较三个策略。算法、兼容性、开发集结果与限制见[上下文编译说明](docs/retrieval.md)。

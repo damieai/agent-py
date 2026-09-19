@@ -1,3 +1,4 @@
+import json
 import re
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -28,10 +29,15 @@ class ContextBundle:
 class ContextCompiler:
     """ACL filtering precedes ranking. Byte budget is conservative for text-only material."""
 
-    def __init__(self, db):
+    def __init__(self, db, strategy="lexical"):
+        if strategy not in {"lexical", "bm25_rrf"}:
+            raise DomainError("CONTEXT_STRATEGY", "Unknown retrieval strategy", 422)
         self.db = db
+        self.strategy = strategy
 
     def _scope(self, s, principal, project, environment, task_id):
+        if project not in principal.projects or environment not in principal.environments:
+            raise DomainError("FORBIDDEN", "Context outside principal scope", 403)
         check_grant(s, principal.tenant_id, principal.subject, project, environment)
         if task_id is not None:
             task = tenant_get(s, Task, task_id, principal.tenant_id)
@@ -51,13 +57,16 @@ class ContextCompiler:
     ) -> ContextBundle:
         if budget < 1 or budget > 100_000:
             raise DomainError("CONTEXT_BUDGET", "Invalid context budget", 422)
+        if len(query) > 20_000:
+            raise DomainError("CONTEXT_QUERY", "Query exceeds 20000 characters", 422)
         if project not in principal.projects or environment not in principal.environments:
             raise DomainError("FORBIDDEN", "Context outside principal scope", 403)
         when = as_of or now()
         with self.db.session(principal.tenant_id) as s:
             self._scope(s, principal, project, environment, task_id)
             docs = s.scalars(
-                select(Document).where(
+                select(Document)
+                .where(
                     Document.tenant_id == principal.tenant_id,
                     Document.project == project,
                     or_(Document.task_id.is_(None), Document.task_id == task_id),
@@ -65,8 +74,30 @@ class ContextCompiler:
                     Document.valid_from <= when,
                     or_(Document.valid_until.is_(None), Document.valid_until > when),
                 )
-            ).all()
-            allowed = [d for d in docs if principal.subject in d.allowed_subjects]
+                .execution_options(yield_per=100)
+            )
+            allowed, corpus_bytes = [], 0
+            for d in docs:
+                if principal.subject not in d.allowed_subjects:
+                    continue
+                corpus_bytes += len(d.body.encode())
+                if len(allowed) >= 1000 or corpus_bytes > 5_000_000:
+                    raise DomainError("CONTEXT_CAPACITY", "Authorized corpus exceeds limit", 413)
+                allowed.append(d)
+        if self.strategy == "bm25_rrf":
+            from agent_py.retrieval import POLICY, rank_chunks
+
+            included, omitted, used = [], [], 0
+            for entry in rank_chunks(allowed, query):
+                cost = len(json.dumps(entry, ensure_ascii=False).encode())
+                if used + cost > budget:
+                    omitted.append(
+                        {"id": entry["id"], "chunk_id": entry["chunk_id"], "reason": "budget"}
+                    )
+                    continue
+                included.append(entry)
+                used += cost
+            return ContextBundle(included, omitted, used, digest(included), POLICY)
         q = terms(query)
         ranked = sorted(allowed, key=lambda d: (-len(q & terms(d.body)), d.id))
         included, omitted, used = [], [], 0
@@ -80,8 +111,6 @@ class ContextCompiler:
                 "body": d.body,
                 "trust": "untrusted_source",
             }
-            import json
-
             cost = len(json.dumps(entry, ensure_ascii=False).encode())
             if used + cost > budget:
                 omitted.append({"id": d.id, "reason": "budget"})
@@ -98,8 +127,15 @@ class ContextCompiler:
         bundle: ContextBundle,
         task_id: str | None = None,
     ):
+        from agent_py.retrieval import POLICY, chunk_document
+
+        if bundle.policy_version not in {"context-v1-lexical", POLICY}:
+            raise DomainError("CONTEXT_POLICY", "Unsupported persisted context policy", 409)
+        if digest(bundle.documents) != bundle.digest:
+            raise DomainError("EVIDENCE_STALE", "Context manifest changed", 409)
         with self.db.session(principal.tenant_id) as s:
             self._scope(s, principal, project, environment, task_id)
+            checked = {}
             for item in bundle.documents:
                 d = s.scalar(
                     select(Document).where(
@@ -116,6 +152,16 @@ class ContextCompiler:
                 if (
                     not d
                     or principal.subject not in d.allowed_subjects
-                    or digest(d.body) != digest(item["body"])
+                    or d.source != item["source"]
+                    or item.get("trust") != "untrusted_source"
                 ):
+                    raise DomainError("EVIDENCE_STALE", "Evidence changed or access revoked", 409)
+                if bundle.policy_version == POLICY:
+                    if d.id not in checked:
+                        checked[d.id] = {c["chunk_id"]: c for c in chunk_document(d)}
+                    original = checked[d.id].get(item.get("chunk_id"))
+                    valid = original and all(item.get(k) == v for k, v in original.items())
+                else:
+                    valid = digest(d.body) == digest(item["body"])
+                if not valid:
                     raise DomainError("EVIDENCE_STALE", "Evidence changed or access revoked", 409)

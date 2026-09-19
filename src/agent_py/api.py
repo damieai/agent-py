@@ -67,6 +67,12 @@ class VerificationRetryRequest(BaseModel):
     attempt_id: str = Field(min_length=1, max_length=36)
 
 
+class ContextRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    query: str | None = Field(default=None, min_length=1, max_length=8000)
+    budget: int = Field(default=6000, ge=1, le=100_000)
+
+
 def create_app(
     settings: Settings | None = None, db: Database | None = None, remote=None
 ) -> FastAPI:
@@ -126,6 +132,25 @@ def create_app(
         return authenticate(settings, authorization[7:])
 
     Auth = Annotated[Principal, Depends(current)]
+
+    @app.post("/api/v1/tasks/{task_id}/context/preview")
+    def context_preview(task_id: str, body: ContextRequest, p: Auth):
+        from agent_py.context import ContextCompiler
+
+        task = service.get_task(p, task_id)
+        compiler = ContextCompiler(db, settings.context_strategy)
+        bundle = compiler.compile(
+            p,
+            task.contract["project"],
+            task.contract["environment"],
+            body.query if body.query is not None else task.contract["goal"],
+            budget=body.budget,
+            task_id=task_id,
+        )
+        compiler.validate(
+            p, task.contract["project"], task.contract["environment"], bundle, task_id=task_id
+        )
+        return JSONResponse(bundle.as_dict(), headers={"Cache-Control": "no-store"})
 
     @app.get("/api/v1/ops/summary")
     def operations_summary(p: Auth):
