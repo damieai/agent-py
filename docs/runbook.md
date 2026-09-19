@@ -70,3 +70,7 @@
 ## 企业读取容量等待
 
 `DEPENDENCY_CAPACITY` 表示共享名额已满，先用 `dependency-status TENANT` 查看 active_reads/read_limit，再检查供应商延迟与挂起 Worker。按供应商配额评估后可用 `dependency-limit TENANT HASH LIMIT` 修改共享限额；调低不会驱逐在途读取。不要通过 reset 或删除租约绕开限流。`DEPENDENCY_LEASE_LOST` 表示超过 90 秒或已释放，返回内容不可继续发布。升级 0010 后需授予运行角色新租约表的 DML 权限，回滚再升级时重新授予；详见[依赖故障治理](dependency-resilience.md)。
+
+## 认证公钥轮换
+
+按[认证说明](authentication.md)先部署新旧公钥重叠清单，再切换发行方签名 kid，最后退休旧钥。`auth-keys-check FILE` 用于离线预检；配置挂载只由受信运维更新。`AUTH_UNCONFIGURED` 或 readiness 的 `authentication_keys_unavailable` 表示配置异常，修复可信文件，不能切回开发 secret 绕过。`UNAUTHENTICATED` 应核对发行方、audience、typ、寿命与 kid，不把 Token 中的 URL 加入信任。撤钥不能代替取消已接受任务或撤销 Grant。

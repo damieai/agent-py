@@ -15,6 +15,8 @@ from pydantic import Field, model_validator
 
 from agent_py.audit import MAX_RECORDING_BYTES, check_recording
 from agent_py.domain import Contract, DomainError, digest
+from agent_py.jsonio import decode_json as decode_json
+from agent_py.jsonio import load_json as load_json
 
 DOMAIN = b"agent-py/audit-attestation/v1\x00"
 MAX_SIGNED_BYTES = MAX_RECORDING_BYTES + 16_384
@@ -97,29 +99,6 @@ def canonical(value):
     return json.dumps(
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
     ).encode()
-
-
-def decode_json(raw):
-    def object_pairs(pairs):
-        result = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError("Duplicate JSON field")
-            result[key] = value
-        return result
-
-    def invalid_constant(_):
-        raise ValueError("Nonfinite JSON value")
-
-    return json.loads(raw, object_pairs_hook=object_pairs, parse_constant=invalid_constant)
-
-
-def load_json(path: Path, limit=100_000):
-    with path.open("rb") as stream:
-        raw = stream.read(limit + 1)
-    if len(raw) > limit:
-        raise ValueError("JSON file exceeds limit")
-    return decode_json(raw)
 
 
 def private_key(path):

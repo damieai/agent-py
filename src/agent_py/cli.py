@@ -54,6 +54,44 @@ def token(subject: str = "developer"):
 
 
 @app.command()
+def auth_keys_check(file: Path):
+    """Validate a local RSA JWKS and show public-key fingerprints without loading Service."""
+    import hashlib
+
+    from cryptography.hazmat.primitives import serialization
+
+    from agent_py.auth_keys import load_keyset
+    from agent_py.domain import DomainError
+
+    try:
+        keys = load_keyset(file)
+    except DomainError as exc:
+        typer.echo(f"{exc.code}: {exc.message}", err=True)
+        raise typer.Exit(1) from None
+    typer.echo(
+        json.dumps(
+            {
+                "keys": [
+                    {
+                        "kid": kid,
+                        "algorithm": "RS256",
+                        "bits": key.key_size,
+                        "spki_sha256": hashlib.sha256(
+                            key.public_bytes(
+                                serialization.Encoding.DER,
+                                serialization.PublicFormat.SubjectPublicKeyInfo,
+                            )
+                        ).hexdigest(),
+                    }
+                    for kid, key in sorted(keys.items())
+                ]
+            },
+            indent=2,
+        )
+    )
+
+
+@app.command()
 def api(host: str = "127.0.0.1", port: int = 8000):
     import uvicorn
 

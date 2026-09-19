@@ -56,7 +56,8 @@
 - [x] 开发签名 Token、生产外部 issuer/RSA、公钥配置与实时 Grant 撤销。
 - [x] PostgreSQL FORCE RLS 迁移，生产拒绝特权角色；真实非特权角色测试。
 - [x] 请求幂等、跨租户 API 检查、SSE 与产物摘要验证。
-- [ ] 完整 OIDC 登录、JWKS 轮换、角色撤销和权限管理界面。
+- [x] 受控本地 RSA JWKS 重叠轮换/撤钥、严格 JWT 类型/寿命/JSON 校验、离线指纹预检及 API/SSE 复核。
+- [ ] 完整 OIDC 登录、在线 discovery/JWKS 获取、会话及角色撤销和权限管理界面。
 - [x] 13 条租户复合外键、提交时完整性检查、存量预检及 SQLite/PostgreSQL 迁移回滚验证。
 - [ ] 审计留存与删除策略、同租户业务对象关系的进一步约束。
 

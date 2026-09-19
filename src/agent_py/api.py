@@ -191,6 +191,14 @@ def create_app(
                 conn.execute(text("SELECT 1 FROM tasks LIMIT 1"))
         except Exception:
             return JSONResponse({"status": "database_unavailable"}, status_code=503)
+        if settings.auth_jwks_file is not None:
+            from agent_py.auth_keys import load_keyset
+
+            try:
+                load_keyset(settings.auth_jwks_file)
+            except DomainError:
+                return JSONResponse({"status": "authentication_keys_unavailable"}, status_code=503)
+            return {"status": "ready", "scope": "api-database-and-local-jwks"}
         return {"status": "ready", "scope": "api-database-only"}
 
     @app.post("/api/v1/tasks", status_code=202)

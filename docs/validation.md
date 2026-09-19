@@ -5,7 +5,7 @@
 | 检查 | 命令 | 结果 |
 |---|---|---|
 | 静态检查及格式 | `make check` | 通过，包含迁移文件 |
-| 默认测试 | `.venv/bin/pytest -q` | 292 通过；4 个基础设施测试默认跳过 |
+| 默认测试 | `.venv/bin/pytest -q` | 342 通过；4 个基础设施测试默认跳过 |
 | PostgreSQL | `AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q` | 1 通过：迁移、非特权角色 RLS、并发预算、共享准入、运维聚合、分块检索、并发审计快照、共享熔断及复合外键迁移回滚 |
 | Temporal | `AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_runtime.py -q` | 2 通过：Outbox 与本地服务工作流 |
 | Temporal 候选修复 | `AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_repair_workflow.py -m integration -q` | 1 通过：冻结输入到人工审阅，再取消；模型/容器为测试适配器 |
@@ -50,3 +50,7 @@
 企业读取共享容量里程碑新增 19 项默认测试，全量套件 292 通过、4 跳过（23.67 秒），覆盖跨服务实例竞争、租户/来源隔离、重试持有同一名额、容量拒绝不发请求、异常/撤权释放、崩溃到期回收、迟到回执不能释放替代名额、重复完成不重复计数、调低容量不驱逐、配置仅首次初始化、重置不超配、CLI 修改与指标范围，以及旧熔断状态升级保留和容量迁移回滚再升级。真实 PostgreSQL 完整迁移、非特权角色 RLS、跨租户外键和四连接竞争通过（1 项，1.82 秒）。回滚重建新表后重新授予运行角色 DML 权限，部署文档已同步。
 
 本地 SQLite 在备份后升级至 `0010_dependency_bulkhead`，Alembic schema 检查无差异；监控 YAML/JSON 可解析，静态检查通过。本轮没有更改前端及 Temporal Workflow，未重跑浏览器构建或 Temporal 服务集成。真实供应商压测、告警送达、连接池复用和跨租户供应商总配额仍未验收；有效租约数上限不等于远端连接的硬上限。
+
+认证公钥轮换里程碑新增 50 项默认测试：实际 RSA 签名的新旧钥重叠、移除即时失效、未知 kid、错误 issuer/audience/typ/时间/范围、算法混淆、内嵌公钥与 URL 头拒绝、重复 JSON/UTF-16/非规范编码/大小限制、私钥及弱钥配置拒绝、缺失文件/FIFO 拒绝、API 与 SSE 分页撤钥、Grant 撤销、readiness、离线指纹 CLI、静态公钥兼容、开发 Token 寿命与允许时钟偏差。全量套件 342 通过、4 跳过（26.51 秒），静态检查通过。开发 Token 改为同一整数时刻计算 iat/exp，避免跨秒多出寿命；最终认证/API/审计相关 76 项再次通过（7.87 秒），包含已知 kid 使用错误签名密钥的拒绝断言。
+
+本轮没有数据库迁移或前端变更，未重跑 PostgreSQL/Temporal/前端构建；没有接入真实身份提供方、在线 JWKS 分发或登录跳转。生产认证容量、多副本轮换时序与角色会话撤销尚未验收。审计与评测继续通过共享严格 JSON 解析器的既有回归测试。

@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     artifact_root: Path = Path(".runtime/artifacts")
     auth_secret: SecretStr = SecretStr("")
     auth_public_key: str = ""
+    auth_jwks_file: Path | None = None
+    auth_token_type: str = Field(default="JWT", min_length=1, max_length=80)
+    auth_max_token_lifetime_seconds: int = Field(default=3600, ge=60, le=86400)
+    auth_clock_skew_seconds: int = Field(default=0, ge=0, le=60)
     auth_issuer: str = "agent-py-local"
     auth_audience: str = "agent-py"
     execution_mode: Literal["simulation", "live"] = "simulation"
@@ -50,11 +54,17 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production(self):
+        if self.auth_public_key and self.auth_jwks_file is not None:
+            raise ValueError("Configure exactly one RSA source: public key or local JWKS")
         if self.environment == "production":
             if not self.database_url.startswith("postgresql"):
                 raise ValueError("Production requires PostgreSQL")
-            if not self.auth_public_key or self.auth_issuer == "agent-py-local":
-                raise ValueError("Production requires an external issuer and RSA public key")
+            if (
+                not self.auth_public_key and self.auth_jwks_file is None
+            ) or self.auth_issuer == "agent-py-local":
+                raise ValueError(
+                    "Production requires an external issuer and RSA public key or local JWKS"
+                )
         if self.daily_budget_micro_usd <= 0:
             raise ValueError("A positive daily budget is mandatory")
         return self
