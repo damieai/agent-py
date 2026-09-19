@@ -1,6 +1,6 @@
 # Agent Engineering Workbench
 
-研发交付与故障处置 Agent 的工程实现。当前版本可运行**双链路仿真、任务 API、审批工作台、动作对账、Temporal Worker、上下文编译与回放**；包含企业只读适配器和显式调用的模型网关。
+研发交付与故障处置 Agent 的工程实现。当前版本包含**双链路仿真、持久化只读调查、有界候选修复、审批工作台、动作对账、Temporal Worker、上下文编译与回放**。候选修复已连接模型网关和容器验证编排，实际模型与容器验收仍待完成。
 
 这是迭代中的工程项目，**尚未完成 B00—B12 的全部计划**。真实企业写入默认关闭，仿真不调用模型、不修改企业系统，仿真通过率不代表模型质量或生产可靠率。[实施状态与剩余任务](docs/implementation-plan.md)列明差距。
 
@@ -87,7 +87,7 @@ agent-py ingest TASK_ID ./selected-runbook.txt
 agent-py analyze TASK_ID INPUT_MICRO_USD_PER_TOKEN OUTPUT_MICRO_USD_PER_TOKEN --allow-api
 ```
 
-费用参数按实际使用的模型填写。该命令产生分析产物，不执行模型提议的动作；当前还未接入自主代码修复循环。不要导入未经允许出站的企业材料。
+费用参数按实际使用的模型填写。该命令产生分析产物，不执行模型提议的动作；候选修复使用下面单独启用的工作流。不要导入未经允许出站的企业材料。
 
 也可让 Worker 执行持久化只读分析：先运行 `make migrate`，配置 `AGENT_EXECUTION_MODE=live`、`AGENT_ALLOW_MODEL_API=true`，并将 `AGENT_MODEL_INPUT_MICRO_PER_TOKEN` 和 `AGENT_MODEL_OUTPUT_MICRO_PER_TOKEN` 设置为实际正数费用。未显式开启时不会发起模型请求。创建任务并用 `ingest` 导入证据后，由 Worker 或 `agent-py tick TASK_ID` 推进。
 
@@ -99,7 +99,13 @@ agent-py analyze TASK_ID INPUT_MICRO_USD_PER_TOKEN OUTPUT_MICRO_USD_PER_TOKEN --
 
 新导入与采集的证据绑定任务；未变化的采集内容按摘要去重。旧版本未绑定任务的文档仍按原项目 ACL 共享，迁移不会自动猜测其归属。采集省略构建参数及 Pod 配置，但工单与 PR 正文仍可能包含业务敏感信息，需要按企业出站规则选择来源。真实账号联调尚未完成。
 
-## 关键边界
+## 有界候选修复
+
+`workflow=repair_candidate` 将已授权的本地源码、任务证据、模型补丁、容器验证和人工审阅连接起来。失败候选可按清单上限再次生成（最多 3 次），每次回到同一冻结基线。补丁和验证结果持久化，工作台可查看每轮状态和源码差异。通过回归后停在 `CANDIDATE_READY_FOR_REVIEW`，没有自动推送、合并或部署。
+
+该路径需 `live` 模式、付费模型及候选执行两个显式开关、允许源码出站的仓库绑定、digest 镜像和独立 oracle。完整配置及故障恢复见[候选修复操作说明](docs/repair-workflow.md)，示例见[repair-manifest.json](examples/repair-manifest.json)。
+
+## 执行边界
 
 候选补丁的基线/修复对照验证可通过 `agent-py verify-patch` 执行，配置与验收限制见[沙盒验证说明](docs/sandbox-verification.md)。需要可用 Docker 和预置的 digest 镜像，当前环境尚未完成容器验收。
 

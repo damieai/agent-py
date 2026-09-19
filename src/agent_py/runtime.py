@@ -24,7 +24,7 @@ class AgentWorkflow:
             result = await workflow.execute_activity(
                 "agent_tick",
                 identity,
-                start_to_close_timeout=timedelta(minutes=2),
+                start_to_close_timeout=timedelta(minutes=5),
                 retry_policy=RetryPolicy(maximum_attempts=3, initial_interval=timedelta(seconds=1)),
             )
             if result.get("done"):

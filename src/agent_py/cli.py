@@ -209,6 +209,29 @@ def verify_patch(task_id: str, source: Path, patch_file: Path):
 
 
 @app.command()
+def repair_create(goal: str, resource: str = "demo-service", request_key: str = typer.Option(...)):
+    """Create a bounded live candidate-repair task; configured Worker advances it."""
+    service = build_service(get_settings())
+    task = service.create_task(
+        principal(),
+        TaskContract(
+            kind="repair", workflow="repair_candidate", goal=goal, project="demo", resource=resource
+        ),
+        request_key,
+    )
+    typer.echo(task.id)
+
+
+@app.command()
+def repair_status(task_id: str):
+    from agent_py.repair import repair_details
+
+    typer.echo(
+        json.dumps(repair_details(build_service(get_settings()), principal(), task_id), indent=2)
+    )
+
+
+@app.command()
 def analyze(
     task_id: str, input_micro_per_token: int, output_micro_per_token: int, allow_api: bool = False
 ):

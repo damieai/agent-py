@@ -17,7 +17,7 @@ def test_postgres_migrations_rls_and_concurrent_budget(tmp_path, monkeypatch):
 
     from agent_py.adapters.simulation import SimulatedSystem
     from agent_py.config import Settings, get_settings
-    from agent_py.db import Database, Grant
+    from agent_py.db import Database, Grant, RepairAttempt, RepairRun
     from agent_py.domain import DomainError, Principal, TaskContract
     from agent_py.service import Service
 
@@ -68,6 +68,27 @@ def test_postgres_migrations_rls_and_concurrent_budget(tmp_path, monkeypatch):
         task = service.create_task(
             p, TaskContract(kind="repair", project="demo", goal="Test concurrency"), "key"
         )
+        for tenant in ("one", "two"):
+            with appdb.session(tenant) as s:
+                run = RepairRun(
+                    tenant_id=tenant,
+                    task_id=task.id,
+                    snapshot_id="fixture",
+                    source_digest="a" * 64,
+                    config_digest="b" * 64,
+                    max_attempts=2,
+                )
+                s.add(run)
+                s.flush()
+                s.add(RepairAttempt(tenant_id=tenant, run_id=run.id, ordinal=1))
+        with appdb.session("one") as s:
+            assert s.execute(text("SELECT tenant_id FROM repair_runs")).scalars().all() == ["one"]
+            assert s.execute(text("SELECT tenant_id FROM repair_attempts")).scalars().all() == [
+                "one"
+            ]
+        with appdb.engine.connect() as c:
+            assert c.execute(text("SELECT count(*) FROM repair_runs")).scalar() == 0
+            assert c.execute(text("SELECT count(*) FROM repair_attempts")).scalar() == 0
 
         def reserve(i):
             try:

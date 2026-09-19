@@ -70,9 +70,15 @@ class Service:
         self.db, self.settings, self.remote = db, settings, remote
 
     def create_task(self, p: Principal, contract: TaskContract, key: str) -> Task:
+        if contract.workflow == "repair_candidate" and self.settings.execution_mode != "live":
+            raise DomainError(
+                "REPAIR_MODE", "Candidate repair requires live mode and explicit opt-ins", 409
+            )
         if not key or len(key) > 160:
             raise DomainError("INVALID_KEY", "A bounded Idempotency-Key is required", 422)
         body = contract.model_dump()
+        if body["workflow"] == "investigate":
+            body.pop("workflow")  # Preserve request identity for pre-workflow contracts.
         try:
             with self.db.session(p.tenant_id) as s:
                 existing = s.scalar(

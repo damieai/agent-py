@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     sandbox_image: str = ""
     sandbox_oracle: Path | None = None
     sandbox_root: Path = Path(".runtime/sandboxes")
+    sandbox_timeout_seconds: int = Field(default=120, ge=1, le=120)
+    repair_manifest: Path | None = None
+    allow_candidate_execution: bool = False
     allow_model_api: bool = False
     model_input_micro_per_token: int = 0
     model_output_micro_per_token: int = 0

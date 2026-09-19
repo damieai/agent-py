@@ -58,6 +58,16 @@ class ArtifactStore:
             a = tenant_get(s, Artifact, artifact_id, principal.tenant_id)
             t = tenant_get(s, Task, a.task_id, principal.tenant_id)
             authorize(s, principal, t)
+            if (
+                t.contract.get("workflow") == "repair_candidate"
+                and principal.subject != t.principal
+                and "operator" not in principal.roles
+            ):
+                raise DomainError(
+                    "REPAIR_REVIEW_FORBIDDEN",
+                    "Repair artifacts require task ownership or operator role",
+                    403,
+                )
         location = self.root / a.storage_key
         if location.parent.resolve() != self.root or location.is_symlink():
             raise DomainError("ARTIFACT_PATH", "Invalid artifact path", 403)

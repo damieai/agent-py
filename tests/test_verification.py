@@ -55,7 +55,7 @@ def test_verification_snapshots_and_outcome_gates(env, task, tmp_path, before, a
         def __init__(self, image, root):
             assert image == IMAGE
 
-        def verify(self, workspace, *, oracle):
+        def verify(self, workspace, *, oracle, timeout_seconds):
             assert oracle not in workspace.parents and workspace not in oracle.parents
             assert (oracle / "test_app.py").read_text().endswith("== 2\n")
             calls.append((workspace / "src/app.py").read_text())

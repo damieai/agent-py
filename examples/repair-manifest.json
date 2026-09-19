@@ -1,0 +1,14 @@
+{
+  "repositories": [
+    {
+      "tenant": "demo",
+      "project": "demo",
+      "environment": "lab",
+      "resource": "demo-service",
+      "subjects": ["developer"],
+      "source_root": "/absolute/path/to/operator-checkout",
+      "allow_model_export": false,
+      "max_attempts": 2
+    }
+  ]
+}

@@ -59,6 +59,11 @@ class ResumeRequest(BaseModel):
     expected_version: int = Field(ge=1)
 
 
+class VerificationRetryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    attempt_id: str = Field(min_length=1, max_length=36)
+
+
 def create_app(
     settings: Settings | None = None, db: Database | None = None, remote=None
 ) -> FastAPI:
@@ -91,7 +96,11 @@ def create_app(
 
     @app.get("/health/live")
     def live():
-        return {"status": "ok", "mode": settings.execution_mode}
+        return {
+            "status": "ok",
+            "mode": settings.execution_mode,
+            "repair_enabled": settings.allow_candidate_execution and settings.allow_model_api,
+        }
 
     @app.get("/health/ready")
     def ready():
@@ -188,6 +197,31 @@ def create_app(
             op = tenant_get(s, Operation, operation_id, p.tenant_id)
             authorize(s, p, tenant_get(s, Task, op.task_id, p.tenant_id))
             return operation_json(op)
+
+    @app.get("/api/v1/tasks/{task_id}/repair")
+    def repair(task_id: str, p: Auth):
+        from agent_py.repair import repair_details
+
+        return {"repair": repair_details(service, p, task_id)}
+
+    @app.post("/api/v1/tasks/{task_id}/repair/retry-verification", status_code=202)
+    def retry_verification(task_id: str, body: VerificationRetryRequest, p: Auth):
+        from agent_py.repair import RepairHarness
+
+        return RepairHarness(service).retry_verification(p, task_id, body.attempt_id)
+
+    @app.get("/api/v1/tasks/{task_id}/repair/attempts/{attempt_id}/patch")
+    def repair_patch(task_id: str, attempt_id: str, p: Auth):
+        from agent_py.db import RepairAttempt, RepairRun
+
+        service.get_task(p, task_id)
+        with db.session(p.tenant_id) as s:
+            attempt = tenant_get(s, RepairAttempt, attempt_id, p.tenant_id)
+            run = tenant_get(s, RepairRun, attempt.run_id, p.tenant_id)
+            if run.task_id != task_id or not attempt.patch_artifact_id:
+                raise DomainError("NOT_FOUND", "Patch not available for this task", 404)
+        _, data = store.read(p, attempt.patch_artifact_id)
+        return JSONResponse(json.loads(data), headers={"Cache-Control": "no-store"})
 
     @app.get("/api/v1/artifacts/{artifact_id}")
     def get_artifact(artifact_id: str, p: Auth):

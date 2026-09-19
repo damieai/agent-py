@@ -155,6 +155,34 @@ class Document(Record):
     valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class RepairRun(Record):
+    __tablename__ = "repair_runs"
+    __table_args__ = (UniqueConstraint("tenant_id", "task_id"),)
+    task_id: Mapped[str] = mapped_column(String(36))
+    snapshot_id: Mapped[str] = mapped_column(String(36))
+    source_digest: Mapped[str] = mapped_column(String(64))
+    config_digest: Mapped[str] = mapped_column(String(64))
+    max_attempts: Mapped[int] = mapped_column(Integer)
+    state: Mapped[str] = mapped_column(String(40), default="ACTIVE")
+
+
+class RepairAttempt(Record):
+    __tablename__ = "repair_attempts"
+    __table_args__ = (UniqueConstraint("tenant_id", "run_id", "ordinal"),)
+    run_id: Mapped[str] = mapped_column(String(36))
+    ordinal: Mapped[int] = mapped_column(Integer)
+    state: Mapped[str] = mapped_column(String(40), default="GENERATING")
+    proposal: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    patch_artifact_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    verification_artifact_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    outcome: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    verification_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    verification_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    verification_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class Database:
     def __init__(self, url: str):
         if url.startswith("sqlite:///", 0) and ":memory:" not in url:

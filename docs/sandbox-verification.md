@@ -13,7 +13,7 @@ agent-py verify-patch TASK_ID examples/demo_service examples/queue-fix.patch.jso
 
 补丁 JSON 是 FileEdit 数组，包含 `path`、原文件的 `original_sha256` 和替换内容 `content`。最多 20 个 Python 源文件、1 MB 替换内容。快照每份最多 200 个 Python 文件、2 MB，拒绝符号链接和特殊文件。
 
-容器使用无网络、只读根目录、独立只读源码及 oracle 挂载、非 root 用户、移除全部 capabilities、禁止新增权限、CPU/内存/PID 限制。可写 `/tmp` 为 128 MB tmpfs，`/dev/shm` 为 16 MB。关闭 Docker 日志驱动，将附加输出直接读入受限内存；输出超过 128 KB 或运行超过 600 秒时请求终止容器。运行器不会把任意体积输出写入宿主临时文件。容器终止失败会传播错误，需按容器名检查守护进程。
+容器使用无网络、只读根目录、独立只读源码及 oracle 挂载、非 root 用户、移除全部 capabilities、禁止新增权限、CPU/内存/PID 限制。可写 `/tmp` 为 128 MB tmpfs，`/dev/shm` 为 16 MB。关闭 Docker 日志驱动，将附加输出直接读入受限内存；输出超过 128 KB 或超过配置时间时请求终止容器。CLI/修复工作流的每次运行时间由 `AGENT_SANDBOX_TIMEOUT_SECONDS` 指定，范围 1—120 秒；底层适配器的直接调用硬上限为 600 秒。运行器不会把任意体积输出写入宿主临时文件。容器终止失败会传播错误，需按容器名检查守护进程。
 
 pytest 在隔离 Python 启动模式下预先导入，再添加候选源码路径；禁止插件自动加载、仓库配置及 conftest，只执行 `/oracle` 下的用例。**候选模块与 Python oracle 仍处于同一进程**，恶意模块可能干扰验收器。因此这是一套回归验证机制，不是对抗性正确性证明；其产物不能直接满足业务成功条件，也不授权合并或部署。后续需要独立进程黑盒 oracle 和真实容器红队验收。
 

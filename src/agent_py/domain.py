@@ -25,6 +25,7 @@ class Principal(Contract):
 
 class TaskContract(Contract):
     kind: Literal["repair", "incident"]
+    workflow: Literal["investigate", "repair_candidate"] = "investigate"
     goal: str = Field(min_length=5, max_length=8000)
     project: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
     environment: Literal["lab", "staging", "production"] = "lab"
@@ -32,6 +33,12 @@ class TaskContract(Contract):
     budget_micro_usd: int = Field(default=1_000_000, gt=0, le=100_000_000)
     deadline_seconds: int = Field(default=1800, ge=30, le=86400)
     release_id: Literal["agent-v1"] = "agent-v1"
+
+    @model_validator(mode="after")
+    def repair_workflow(self):
+        if self.workflow == "repair_candidate" and self.kind != "repair":
+            raise ValueError("Candidate repair workflow requires repair task kind")
+        return self
 
 
 class ActionProposal(Contract):

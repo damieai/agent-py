@@ -15,6 +15,13 @@ class FileEdit(BaseModel):
     content: str = Field(max_length=200_000)
 
 
+class PatchProposal(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    summary: str = Field(min_length=1, max_length=4000)
+    evidence_ids: list[str] = Field(max_length=100)
+    edits: list[FileEdit] = Field(min_length=1, max_length=20)
+
+
 def validate_patch(workspace: Path, edits: list[FileEdit]) -> list[tuple[Path, bytes]]:
     root = workspace.resolve()
     if not 1 <= len(edits) <= 20 or sum(len(e.content.encode()) for e in edits) > 1_000_000:

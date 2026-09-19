@@ -64,7 +64,16 @@ class VerificationRunner:
                     "VERIFICATION_SCOPE", "Candidate verification requires a repair task"
                 )
 
-    def run(self, principal: Principal, task_id: str, source: Path, edits: list[FileEdit]):
+    def run(
+        self,
+        principal: Principal,
+        task_id: str,
+        source: Path,
+        edits: list[FileEdit],
+        *,
+        verification_id: str | None = None,
+        expected_oracle_digest: str | None = None,
+    ):
         self._check(principal, task_id)
         settings = self.service.settings
         if not settings.sandbox_image or settings.sandbox_oracle is None:
@@ -91,6 +100,11 @@ class VerificationRunner:
             )
             base_manifest = snapshot_python(source / "src", baseline / "src")
             oracle_manifest = snapshot_python(settings.sandbox_oracle, oracle_copy)
+            if (
+                expected_oracle_digest is not None
+                and digest(oracle_manifest) != expected_oracle_digest
+            ):
+                raise DomainError("ORACLE_CHANGED", "Oracle changed since repair snapshot")
             shutil.copytree(baseline, candidate)
             apply_patch(candidate, edits)
             candidate_manifest = {
@@ -98,9 +112,13 @@ class VerificationRunner:
                 for path in base_manifest
             }
             self._check(principal, task_id)
-            before = sandbox.verify(baseline, oracle=oracle_copy)
+            before = sandbox.verify(
+                baseline, oracle=oracle_copy, timeout_seconds=settings.sandbox_timeout_seconds
+            )
             self._check(principal, task_id)
-            after = sandbox.verify(candidate, oracle=oracle_copy)
+            after = sandbox.verify(
+                candidate, oracle=oracle_copy, timeout_seconds=settings.sandbox_timeout_seconds
+            )
             self._check(principal, task_id)
             if (
                 before.limit
@@ -116,6 +134,7 @@ class VerificationRunner:
             else:
                 outcome = "CANDIDATE_FAILED"
             report = {
+                "verification_id": verification_id,
                 "outcome": outcome,
                 "image": settings.sandbox_image,
                 "baseline_manifest": base_manifest,

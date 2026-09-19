@@ -8,6 +8,9 @@ pipelines:
           - uv sync --extra dev --frozen
           - .venv/bin/ruff check .
           - .venv/bin/ruff format --check .
+          - mkdir -p .runtime
+          - AGENT_DATABASE_URL=sqlite:///.runtime/ci-migrations.db .venv/bin/alembic upgrade head
+          - AGENT_DATABASE_URL=sqlite:///.runtime/ci-migrations.db .venv/bin/alembic check
           - .venv/bin/pytest -q --junitxml=.runtime/tests.xml
         artifacts:
           - .runtime/tests.xml

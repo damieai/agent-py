@@ -20,12 +20,17 @@ class InvestigationHarness:
         service = self.service
         with service.db.session(tenant) as s:
             task = tenant_get(s, Task, task_id, tenant)
+            repair_candidate = task.contract.get("workflow") == "repair_candidate"
             if task.status == "TERMINATED":
                 return {"done": True, "result": task.result}
             if task.taken_over:
                 return {"done": False, "wait": "HUMAN_TAKEOVER"}
             if not task.cancelled:
                 service._executable(s, task)
+        if repair_candidate:
+            from agent_py.repair import RepairHarness
+
+            return RepairHarness(service, gateway=self.gateway).tick(tenant, task_id)
         if task.cancelled:
             service.finish(tenant, task_id)
             return {"done": True, "result": "CANCELLED"}
