@@ -1,0 +1,25 @@
+// Install this pipeline from an operator-controlled repository, not the candidate branch.
+pipeline {
+  agent { label 'isolated-verification' }
+  options { timeout(time: 15, unit: 'MINUTES'); disableConcurrentBuilds() }
+  parameters {
+    string(name: 'CANDIDATE_SHA', description: 'Exact candidate commit')
+    string(name: 'OPERATION_ID', description: 'Agent action identity')
+  }
+  stages {
+    stage('Validate input') {
+      steps {
+        script {
+          if (!(params.CANDIDATE_SHA ==~ /[a-f0-9]{40}/)) { error('Invalid SHA') }
+          if (!(params.OPERATION_ID ==~ /[a-f0-9-]{36}/)) { error('Invalid operation identity') }
+        }
+      }
+    }
+    stage('Verify candidate') {
+      steps {
+        echo 'Configure a fixed repository and pinned sandbox image before enabling this job.'
+        error('Template is intentionally disabled until repository and sandbox policy are provisioned')
+      }
+    }
+  }
+}

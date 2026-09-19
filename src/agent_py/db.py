@@ -121,6 +121,25 @@ class Reservation(Record):
     call_key: Mapped[str] = mapped_column(String(160))
     maximum: Mapped[int] = mapped_column(Integer)
     actual: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    dispatched: Mapped[bool] = mapped_column(default=False)
+    request_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    decision: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    day: Mapped[str] = mapped_column(String(10), default=lambda: now().date().isoformat())
+
+
+class DailyBudget(Record):
+    __tablename__ = "daily_budgets"
+    __table_args__ = (UniqueConstraint("tenant_id", "day"),)
+    day: Mapped[str] = mapped_column(String(10))
+    spent: Mapped[int] = mapped_column(Integer, default=0)
+    reserved: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Policy(Record):
+    __tablename__ = "policies"
+    __table_args__ = (UniqueConstraint("tenant_id"),)
+    disabled_tools: Mapped[list] = mapped_column(JSON, default=list)
+    stopped: Mapped[bool] = mapped_column(default=False)
 
 
 class Document(Record):
@@ -139,14 +158,17 @@ class Database:
     def __init__(self, url: str):
         if url.startswith("sqlite:///", 0) and ":memory:" not in url:
             from pathlib import Path
+
             Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
         options = {"connect_args": {"check_same_thread": False}} if url.startswith("sqlite") else {}
         self.engine = create_engine(url, **options)
         if url.startswith("sqlite"):
+
             @event.listens_for(self.engine, "connect")
             def configure_sqlite(connection, _):
                 connection.execute("PRAGMA foreign_keys=ON")
                 connection.execute("PRAGMA busy_timeout=5000")
+
         self.sessions = sessionmaker(self.engine, expire_on_commit=False)
 
     @contextlib.contextmanager
@@ -155,29 +177,61 @@ class Database:
             raise ValueError("Explicit tenant required")
         with self.sessions.begin() as s:
             if self.engine.dialect.name == "postgresql":
-                s.execute(text("SELECT set_config('app.tenant_id', :tenant, true)"),
-                          {"tenant": tenant})
+                s.execute(
+                    text("SELECT set_config('app.tenant_id', :tenant, true)"), {"tenant": tenant}
+                )
             yield s
 
     def create_schema(self):
         Base.metadata.create_all(self.engine)
 
+    def assert_production_role(self):
+        if self.engine.dialect.name != "postgresql":
+            raise ValueError("Production requires PostgreSQL")
+        with self.engine.connect() as c:
+            unsafe = c.scalar(
+                text("SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname=current_user")
+            )
+            owns_tables = c.scalar(
+                text(
+                    "SELECT count(*) FROM pg_tables WHERE schemaname='public' AND tableowner=current_user"
+                )
+            )
+            if unsafe or owns_tables:
+                raise ValueError(
+                    "Runtime database role must not own tables, bypass RLS, or be superuser"
+                )
+
 
 def tenant_get(s: Session, model, id: str, tenant: str, lock: bool = False):
     from sqlalchemy import select
+
     stmt = select(model).where(model.id == id, model.tenant_id == tenant)
     if lock:
         stmt = stmt.with_for_update()
     obj = s.scalar(stmt)
     if obj is None:
         from agent_py.domain import DomainError
+
         raise DomainError("NOT_FOUND", "Resource not found", 404)
     return obj
 
 
 def emit(s: Session, task: Task, kind: str, payload: dict):
     from sqlalchemy import update
-    seq = s.scalar(update(Task).where(Task.id == task.id, Task.tenant_id == task.tenant_id)
-                   .values(next_sequence=Task.next_sequence + 1).returning(Task.next_sequence))
-    s.add(TaskEvent(tenant_id=task.tenant_id, task_id=task.id, sequence=seq,
-                    event_type=kind, payload=payload))
+
+    seq = s.scalar(
+        update(Task)
+        .where(Task.id == task.id, Task.tenant_id == task.tenant_id)
+        .values(next_sequence=Task.next_sequence + 1)
+        .returning(Task.next_sequence)
+    )
+    s.add(
+        TaskEvent(
+            tenant_id=task.tenant_id,
+            task_id=task.id,
+            sequence=seq,
+            event_type=kind,
+            payload=payload,
+        )
+    )

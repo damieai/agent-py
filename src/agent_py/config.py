@@ -20,7 +20,12 @@ class Settings(BaseSettings):
     temporal_namespace: str = "default"
     task_queue: str = "agent-py-v1"
     model_id: str = ""
+    allow_model_api: bool = False
+    model_input_micro_per_token: int = 0
+    model_output_micro_per_token: int = 0
     model_api_key: SecretStr = SecretStr("")
+    webhook_secret: SecretStr = SecretStr("")
+    webhook_tenant: str = ""
     daily_budget_micro_usd: int = 20_000_000
     max_active_per_tenant: int = 8
     max_queue_per_tenant: int = 100

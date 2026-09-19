@@ -1,0 +1,64 @@
+name: agent-py
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: agent
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: ${AGENT_DB_PASSWORD:?Set AGENT_DB_PASSWORD}
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: ["database:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d agent"]
+      interval: 5s
+      retries: 10
+  temporal:
+    image: temporalio/temporal:1.5.1
+    command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/data/temporal.db"]
+    ports: ["127.0.0.1:7233:7233", "127.0.0.1:8233:8233"]
+    volumes: ["temporal:/data"]
+  api:
+    build:
+      context: .
+      dockerfile: ops/Dockerfile
+    environment: &app-env
+      AGENT_DATABASE_URL: postgresql+psycopg://agent:${AGENT_DB_PASSWORD}@postgres:5432/agent
+      AGENT_AUTH_SECRET: ${AGENT_AUTH_SECRET:?Set a random secret}
+      AGENT_EXECUTION_MODE: simulation
+      AGENT_TEMPORAL_ADDRESS: temporal:7233
+      AGENT_ARTIFACT_ROOT: /app/.runtime/artifacts
+    ports: ["127.0.0.1:8000:8000"]
+    volumes: ["runtime:/app/.runtime"]
+    depends_on:
+      postgres: {condition: service_healthy}
+  migrate:
+    build:
+      context: .
+      dockerfile: ops/Dockerfile
+    environment: *app-env
+    command: ["alembic", "upgrade", "head"]
+    profiles: ["tools"]
+    depends_on:
+      postgres: {condition: service_healthy}
+  worker:
+    build:
+      context: .
+      dockerfile: ops/Dockerfile
+    environment: *app-env
+    command: ["agent-py", "worker"]
+    volumes: ["runtime:/app/.runtime"]
+    depends_on: [temporal, api]
+    restart: on-failure
+  dispatcher:
+    build:
+      context: .
+      dockerfile: ops/Dockerfile
+    environment: *app-env
+    command: ["agent-py", "dispatcher", "--tenant", "demo"]
+    volumes: ["runtime:/app/.runtime"]
+    depends_on: [temporal, api]
+    restart: on-failure
+volumes:
+  database:
+  temporal:
+  runtime:

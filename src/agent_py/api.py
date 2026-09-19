@@ -1,0 +1,263 @@
+import asyncio
+import json
+from typing import Annotated
+
+from fastapi import Depends, FastAPI, Header, Request
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import select, text
+
+from agent_py.adapters.simulation import DisabledLiveExecutor, SimulatedSystem
+from agent_py.artifacts import ArtifactStore
+from agent_py.config import Settings, get_settings
+from agent_py.db import Approval, Artifact, Database, Operation, Task, TaskEvent, tenant_get
+from agent_py.domain import ActionProposal, ApprovalDecision, DomainError, Principal, TaskContract
+from agent_py.security import authenticate, authorize
+from agent_py.service import Service
+
+
+def task_json(t):
+    return {
+        "id": t.id,
+        "contract": t.contract,
+        "status": t.status,
+        "result": t.result,
+        "waiting_reason": t.waiting_reason,
+        "cancelled": t.cancelled,
+        "spent_micro_usd": t.spent,
+        "reserved_micro_usd": t.reserved,
+        "created_at": t.created_at.isoformat(),
+    }
+
+
+def operation_json(op):
+    return {
+        "id": op.id,
+        "task_id": op.task_id,
+        "tool": op.tool,
+        "resource": op.resource,
+        "parameters": op.parameters,
+        "payload_digest": op.payload_digest,
+        "status": op.status,
+        "recovery_status": op.recovery_status,
+        "attempts": op.attempts,
+        "result": op.result,
+        "error": op.error,
+    }
+
+
+class ProposalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    step_key: str = Field(min_length=1, max_length=160)
+    action: ActionProposal
+
+
+def create_app(
+    settings: Settings | None = None, db: Database | None = None, remote=None
+) -> FastAPI:
+    settings = settings or get_settings()
+    db = db or Database(settings.database_url)
+    if settings.environment == "production":
+        db.assert_production_role()
+    remote = remote or (
+        SimulatedSystem(settings.artifact_root.parent / "authority.db")
+        if settings.execution_mode == "simulation"
+        else DisabledLiveExecutor()
+    )
+    service = Service(db, settings, remote)
+    store = ArtifactStore(db, settings.artifact_root)
+    app = FastAPI(title="Agent Engineering Workbench", version="0.1.0")
+    app.state.service = service
+
+    @app.exception_handler(DomainError)
+    async def domain_error(request: Request, exc: DomainError):
+        return JSONResponse(
+            {"error": {"code": exc.code, "message": exc.message}}, status_code=exc.status
+        )
+
+    def current(authorization: Annotated[str | None, Header()] = None) -> Principal:
+        if not authorization or not authorization.startswith("Bearer "):
+            raise DomainError("UNAUTHENTICATED", "Bearer token required", 401)
+        return authenticate(settings, authorization[7:])
+
+    Auth = Annotated[Principal, Depends(current)]
+
+    @app.get("/health/live")
+    def live():
+        return {"status": "ok", "mode": settings.execution_mode}
+
+    @app.get("/health/ready")
+    def ready():
+        try:
+            with db.engine.connect() as conn:
+                conn.execute(text("SELECT 1 FROM tasks LIMIT 1"))
+        except Exception:
+            return JSONResponse({"status": "database_unavailable"}, status_code=503)
+        return {"status": "ready", "scope": "api-database-only"}
+
+    @app.post("/api/v1/tasks", status_code=202)
+    def create(contract: TaskContract, p: Auth, idempotency_key: Annotated[str, Header()]):
+        return task_json(service.create_task(p, contract, idempotency_key))
+
+    @app.get("/api/v1/tasks")
+    def tasks(p: Auth):
+        with db.session(p.tenant_id) as s:
+            candidates = s.scalars(
+                select(Task)
+                .where(Task.tenant_id == p.tenant_id)
+                .order_by(Task.created_at.desc())
+                .limit(100)
+            ).all()
+            allowed = []
+            for t in candidates:
+                try:
+                    authorize(s, p, t)
+                    allowed.append(task_json(t))
+                except DomainError:
+                    pass
+            return {"items": allowed}
+
+    @app.get("/api/v1/tasks/{task_id}")
+    def get_task(task_id: str, p: Auth):
+        t = service.get_task(p, task_id)
+        with db.session(p.tenant_id) as s:
+            ops = s.scalars(
+                select(Operation).where(
+                    Operation.tenant_id == p.tenant_id, Operation.task_id == task_id
+                )
+            ).all()
+            artifacts = s.scalars(
+                select(Artifact).where(
+                    Artifact.tenant_id == p.tenant_id, Artifact.task_id == task_id
+                )
+            ).all()
+            approvals = s.scalars(
+                select(Approval)
+                .join(Operation, Approval.operation_id == Operation.id)
+                .where(Approval.tenant_id == p.tenant_id, Operation.task_id == task_id)
+            ).all()
+            return {
+                **task_json(t),
+                "operations": [operation_json(o) for o in ops],
+                "artifacts": [{"id": a.id, "kind": a.kind, "digest": a.digest} for a in artifacts],
+                "approvals": [
+                    {
+                        "id": a.id,
+                        "operation_id": a.operation_id,
+                        "status": a.status,
+                        "payload_digest": a.payload_digest,
+                        "expires_at": a.expires_at.isoformat(),
+                    }
+                    for a in approvals
+                ],
+            }
+
+    @app.post("/api/v1/tasks/{task_id}/cancel")
+    def cancel(task_id: str, p: Auth):
+        service.stop(p, task_id)
+        return task_json(service.get_task(p, task_id))
+
+    @app.post("/api/v1/tasks/{task_id}/takeover")
+    def takeover(task_id: str, p: Auth):
+        service.stop(p, task_id, True)
+        return task_json(service.get_task(p, task_id))
+
+    @app.post("/api/v1/tasks/{task_id}/proposals", status_code=201)
+    def propose(task_id: str, body: ProposalRequest, p: Auth):
+        return operation_json(service.propose(p, task_id, body.step_key, body.action))
+
+    @app.post("/api/v1/approvals/{approval_id}/decisions")
+    def decide(approval_id: str, body: ApprovalDecision, p: Auth):
+        a = service.decide(p, approval_id, body.decision, body.expected_digest)
+        return {"id": a.id, "status": a.status}
+
+    @app.get("/api/v1/operations/{operation_id}")
+    def get_operation(operation_id: str, p: Auth):
+        with db.session(p.tenant_id) as s:
+            op = tenant_get(s, Operation, operation_id, p.tenant_id)
+            authorize(s, p, tenant_get(s, Task, op.task_id, p.tenant_id))
+            return operation_json(op)
+
+    @app.get("/api/v1/artifacts/{artifact_id}")
+    def get_artifact(artifact_id: str, p: Auth):
+        artifact, data = store.read(p, artifact_id)
+        return Response(
+            data,
+            media_type="application/octet-stream",
+            headers={
+                "Content-Disposition": f'attachment; filename="{artifact.id}.json"',
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "no-store",
+            },
+        )
+
+    @app.get("/api/v1/tasks/{task_id}/events")
+    async def events(
+        task_id: str,
+        p: Auth,
+        request: Request,
+        after: int = 0,
+        last_event_id: Annotated[str | None, Header()] = None,
+    ):
+        service.get_task(p, task_id)
+        try:
+            cursor = int(last_event_id) if last_event_id is not None else after
+            if cursor < 0:
+                raise ValueError()
+        except ValueError:
+            raise DomainError("INVALID_CURSOR", "Event cursor must be a nonnegative integer", 422)
+
+        async def stream():
+            nonlocal cursor
+            for _ in range(120):
+                if await request.is_disconnected():
+                    break
+                try:
+                    t = service.get_task(p, task_id)  # Recheck grants during a long-lived stream.
+                except DomainError:
+                    yield "event: access_revoked\ndata: {}\n\n"
+                    break
+                with db.session(p.tenant_id) as s:
+                    rows = s.scalars(
+                        select(TaskEvent)
+                        .where(
+                            TaskEvent.tenant_id == p.tenant_id,
+                            TaskEvent.task_id == task_id,
+                            TaskEvent.sequence > cursor,
+                        )
+                        .order_by(TaskEvent.sequence)
+                        .limit(200)
+                    ).all()
+                for row in rows:
+                    cursor = row.sequence
+                    yield f"id: {cursor}\nevent: {row.event_type}\ndata: {json.dumps(row.payload)}\n\n"
+                if t.status == "TERMINATED" and len(rows) < 200:
+                    break
+                yield ": heartbeat\n\n"
+                await asyncio.sleep(1)
+
+        return StreamingResponse(
+            stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
+
+    @app.post("/api/v1/webhooks/connector", status_code=202)
+    async def webhook(request: Request):
+        from agent_py.webhooks import receive
+
+        data = bytearray()
+        async for chunk in request.stream():
+            data.extend(chunk)
+            if len(data) > 1_000_000:
+                raise DomainError("WEBHOOK_SIZE", "Webhook body exceeds limit", 413)
+        event_id = receive(
+            db,
+            settings,
+            bytes(data),
+            request.headers.get("x-agent-timestamp", ""),
+            request.headers.get("x-agent-signature", ""),
+        )
+        return {"event_id": event_id, "accepted": True}
+
+    return app

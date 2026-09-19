@@ -1,0 +1,20 @@
+image: python:3.12-slim
+pipelines:
+  default:
+    - step:
+        name: Python contract and fault tests
+        script:
+          - pip install uv==0.12.17
+          - uv sync --extra dev --frozen
+          - .venv/bin/ruff check .
+          - .venv/bin/ruff format --check .
+          - .venv/bin/pytest -q --junitxml=.runtime/tests.xml
+        artifacts:
+          - .runtime/tests.xml
+    - step:
+        name: Workbench build
+        image: node:24-slim
+        script:
+          - cd web
+          - npm ci
+          - npm run build

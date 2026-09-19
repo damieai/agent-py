@@ -1,0 +1,106 @@
+# Agent Engineering Workbench
+
+研发交付与故障处置 Agent 的工程实现。当前版本可运行**双链路仿真、任务 API、审批工作台、动作对账、Temporal Worker、上下文编译与回放**；包含企业只读适配器和显式调用的模型网关。
+
+这是迭代中的工程项目，**尚未完成 B00—B12 的全部计划**。真实企业写入默认关闭，仿真不调用模型、不修改企业系统，仿真通过率不代表模型质量或生产可靠率。[实施状态与剩余任务](docs/implementation-plan.md)列明差距。
+
+## 本地运行
+
+要求 Python 3.12、uv；前端需要 Node 24。SQLite 用于本地开发，生产配置要求 PostgreSQL 与非特权数据库角色。
+
+```bash
+uv sync --extra dev --frozen
+cp .env.example .env
+```
+
+在 `.env` 设置至少 32 字符的随机 `AGENT_AUTH_SECRET`，不要使用示例或测试密钥。然后：
+
+```bash
+make init
+make demo-repair
+make demo-incident
+make api
+```
+
+`demo-*` 中的自动批准**只在显式仿真模式**可用。正常 API 任务在审批前暂停。
+
+另一个终端启动前端：
+
+```bash
+npm --prefix web ci
+npm --prefix web run dev
+```
+
+打开 Vite 输出的本地地址。用 `agent-py token --subject developer` 生成开发凭证并输入工作台；审批时换成 `agent-py token --subject reviewer` 的凭证。凭证只存在页面内存，刷新后清除。
+
+API 创建的任务需要 Worker 推进。没有 Temporal 时，可显式运行 `agent-py tick TASK_ID` 演示一个仿真步骤；这不是生产恢复方案。
+
+## 持久化运行
+
+运行本地 Temporal CLI：
+
+```bash
+temporal server start-dev --db-filename .runtime/temporal.db
+make worker
+# 再开一个终端
+make dispatcher
+```
+
+也提供 Compose 开发配置。先设置 `AGENT_DB_PASSWORD` 与 `AGENT_AUTH_SECRET`：
+
+```bash
+docker compose up -d postgres temporal
+docker compose run --rm migrate
+docker compose run --rm api agent-py init
+docker compose up -d api worker dispatcher
+```
+
+Compose 的 PostgreSQL 管理角色与 Temporal dev server **仅用于开发**。生产部署需要独立迁移角色、受限运行角色、TLS、持久化 Temporal 服务、备份与镜像 digest 锁定。镜像标签目前是开发配置，尚未完成容器验收。
+
+## 测试和评测
+
+```bash
+make check
+make test
+agent-py evaluate --split development --output .runtime/evaluation.json
+npm --prefix web run build
+```
+
+执行真实基础设施集成测试：
+
+```bash
+uv sync --extra dev --extra postgres-test --frozen
+AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q
+AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_runtime.py -q
+```
+
+PostgreSQL 测试使用独立临时原生数据库；Temporal 测试首次下载本地测试服务。这些进程需要本地 socket 权限。仿真评测有 60/20/40 条配置，但复用场景模板，**只检验执行协议，不用于报告模型泛化能力**。
+
+## 真实模型与企业接入
+
+企业读取实现位于 `adapters/enterprise.py`，覆盖 Bitbucket Cloud、Jira Cloud、Jenkins、Kubernetes、Prometheus 和 Loki。服务 URL 与 Token 必须由可信配置传入；适配器拒绝跨站跳转和过大响应。还没有完成企业端到端联调与自动写入认证。
+
+设置模型 ID、API Key 后，可以对已经导入的授权证据执行单次只读分析：
+
+```bash
+agent-py ingest TASK_ID ./selected-runbook.txt
+agent-py analyze TASK_ID INPUT_MICRO_USD_PER_TOKEN OUTPUT_MICRO_USD_PER_TOKEN --allow-api
+```
+
+费用参数按实际使用的模型填写。该命令产生分析产物，不执行模型提议的动作；当前还未接入自主代码修复循环。不要导入未经允许出站的企业材料。
+
+也可让 Worker 执行持久化只读分析：先运行 `make migrate`，配置 `AGENT_EXECUTION_MODE=live`、`AGENT_ALLOW_MODEL_API=true`，并将 `AGENT_MODEL_INPUT_MICRO_PER_TOKEN` 和 `AGENT_MODEL_OUTPUT_MICRO_PER_TOKEN` 设置为实际正数费用。未显式开启时不会发起模型请求。创建任务并用 `ingest` 导入证据后，由 Worker 或 `agent-py tick TASK_ID` 推进。
+
+该路径使用导入证据，不会自动抓取企业数据。没有匹配证据时等待 `EVIDENCE_REQUIRED`；分析后保存产物并停在 `HUMAN_REVIEW`，不宣称修复成功。已校验的模型决策与费用同事务保存，产物写入失败后可恢复而不再次推理；响应丢失则保守记账并停止自动重试。相同推理身份下证据或请求发生变化会拒绝重用，需要新任务重新分析。
+
+## 关键边界
+
+- HTTP 请求、模型推理和业务动作使用不同的身份及幂等记录。
+- UNKNOWN 保留原动作身份，通过独立 Reconciler 查询外部权威状态。
+- 审批绑定参数摘要，执行时复核批准人和发起人的当前资源授权。
+- 数据库 RLS 在 PostgreSQL 中强制启用；生产启动拒绝超级用户、BYPASSRLS 和表所有者。
+- 沙盒必须使用 digest 固定的容器镜像，没有宿主机执行不可信代码的降级路径。
+- Webhook 仅支持已配对的签名 Connector 通知；通知触发权威查询，不能自行宣布业务成功。
+- 回放没有生产客户端或网络补齐路径；导出包仍需检查业务敏感内容。
+
+更多说明：[实施计划](docs/implementation-plan.md)、[运行手册](docs/runbook.md)、[架构决策](docs/architecture.md)。
