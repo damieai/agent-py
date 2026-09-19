@@ -115,6 +115,7 @@ agent-py analyze TASK_ID INPUT_MICRO_USD_PER_TOKEN OUTPUT_MICRO_USD_PER_TOKEN --
 - 人工接管可通过工作台或 `POST /api/v1/tasks/{id}/resume` 恢复，请求带 `expected_version`；恢复不延长截止时间、不重置预算，取消任务不能恢复。
 - 审批绑定参数摘要，执行时复核批准人和发起人的当前资源授权。
 - 数据库 RLS 在 PostgreSQL 中强制启用；生产启动拒绝超级用户、BYPASSRLS 和表所有者。
+- 13 条租户复合外键在提交时拒绝跨租户或孤立引用；升级至 `0009_tenant_references` 前阅读[维护与回滚步骤](docs/database-integrity.md)。
 - 沙盒必须使用 digest 固定的容器镜像，没有宿主机执行不可信代码的降级路径。
 - Webhook 仅支持已配对的签名 Connector 通知；通知触发权威查询，不能自行宣布业务成功。
 - 回放没有生产客户端或网络补齐路径；导出包仍需检查业务敏感内容。

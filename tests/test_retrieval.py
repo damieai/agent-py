@@ -70,11 +70,16 @@ def test_invalid_python_and_long_lines_are_data_only(env, tmp_path):
 def test_private_expired_future_other_task_and_tenant_do_not_change_ranking(env, task):
     add(env)
     baseline = compile(env, task_id=task.id)
+    from agent_py.domain import TaskContract
+
+    other = env[0].create_task(
+        env[1], TaskContract(kind="repair", goal="Unrelated task", project="demo"), "unrelated"
+    )
     for id, kw in [
         ("private", {"allowed_subjects": ["other"]}),
         ("expired", {"valid_until": now() - timedelta(seconds=1)}),
         ("future", {"valid_from": now() + timedelta(days=1)}),
-        ("other-task", {"task_id": "unrelated"}),
+        ("other-task", {"task_id": other.id}),
         ("other-tenant", {"tenant_id": "t2"}),
         ("revoked", {"revoked": True}),
         ("other-project", {"project": "private"}),

@@ -17,7 +17,29 @@ if context.is_offline_mode():
         context.run_migrations()
 else:
     engine = create_engine(url)
-    with engine.connect() as connection:
-        context.configure(connection=connection, target_metadata=Base.metadata)
-        with context.begin_transaction():
-            context.run_migrations()
+    try:
+        with engine.connect() as connection:
+            if connection.dialect.name == "sqlite":
+                # SQLite batch rebuilds drop referenced tables. Use one explicit maintenance
+                # transaction, then validate every reference before committing any DDL/data.
+                connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+                connection.commit()
+                try:
+                    connection.exec_driver_sql("BEGIN IMMEDIATE")
+                    context.configure(connection=connection, target_metadata=Base.metadata)
+                    with context.begin_transaction():
+                        context.run_migrations()
+                    if connection.exec_driver_sql("PRAGMA foreign_key_check").first():
+                        raise RuntimeError("Migration left invalid foreign key references")
+                    connection.commit()
+                except BaseException:
+                    connection.rollback()
+                    raise
+                finally:
+                    connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+            else:
+                context.configure(connection=connection, target_metadata=Base.metadata)
+                with context.begin_transaction():
+                    context.run_migrations()
+    finally:
+        engine.dispose()

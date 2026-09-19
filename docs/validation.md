@@ -5,8 +5,8 @@
 | 检查 | 命令 | 结果 |
 |---|---|---|
 | 静态检查及格式 | `make check` | 通过，包含迁移文件 |
-| 默认测试 | `.venv/bin/pytest -q` | 206 通过；4 个基础设施测试默认跳过 |
-| PostgreSQL | `AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q` | 1 通过：迁移、非特权角色 RLS、并发预算、共享准入、运维聚合、分块检索、并发审计快照及共享熔断 |
+| 默认测试 | `.venv/bin/pytest -q` | 238 通过；4 个基础设施测试默认跳过 |
+| PostgreSQL | `AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q` | 1 通过：迁移、非特权角色 RLS、并发预算、共享准入、运维聚合、分块检索、并发审计快照、共享熔断及复合外键迁移回滚 |
 | Temporal | `AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_runtime.py -q` | 2 通过：Outbox 与本地服务工作流 |
 | Temporal 候选修复 | `AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_repair_workflow.py -m integration -q` | 1 通过：冻结输入到人工审阅，再取消；模型/容器为测试适配器 |
 | 前端 | `npm --prefix web run build` | TypeScript 检查与 Vite 构建通过 |
@@ -40,3 +40,5 @@
 完整范围及剩余工作见[实施清单](implementation-plan.md)。
 
 审计签名里程碑新增 27 项默认测试：篡改与重新计算包摘要、错误算法/密钥、租户及用途隔离、独立信任策略、轮换与撤销、历史窗口/未来时间、私钥权限与符号链接、禁止覆盖、签名声明与任务不一致、严格 JSON、离线 CLI 与防降级、API 权限及签名配置失败。默认套件 206 项通过，4 项跳过；没有数据库迁移，本轮未重跑 PostgreSQL/Temporal 服务集成。未配置生产签名密钥或验证 KMS/HSM、可信时间戳及不可改写存储。
+
+租户关联完整性里程碑新增 32 项默认测试：13 条关联分别拒绝跨租户与不存在父记录，提交失败整笔回滚、可空项目证据、父记录删除保护、存量升级与回滚再升级、迁移预检拒绝坏数据、表重建中途故障完整回滚。默认套件 238 通过、4 跳过（18.68 秒）。原生 PostgreSQL 在管理角色和非特权 RLS 角色下验证约束，带数据降级、坏数据拒绝、修复后重升及 schema 检查通过（1 项，1.98 秒）。本地 SQLite 在备份后升级至 `0009_tenant_references`，Alembic 无差异。真实 Temporal 审批等待和候选修复—审阅—取消两条集成流程再次通过（2 项，78.15 秒），其中模型及容器仍为测试适配器。本轮未改前端，未重复浏览器构建。大表锁竞争、生产迁移耗时及留存删除策略尚未验收。

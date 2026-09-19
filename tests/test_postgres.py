@@ -14,10 +14,11 @@ def test_postgres_migrations_rls_and_concurrent_budget(tmp_path, monkeypatch):
     import pgserver
     from alembic import command
     from alembic.config import Config
+    from test_tenant_integrity import REFERENCES, reject_reference, seed_graph
 
     from agent_py.adapters.simulation import SimulatedSystem
     from agent_py.config import Settings, get_settings
-    from agent_py.db import Database, Grant, RepairAttempt, RepairRun
+    from agent_py.db import Database, Grant
     from agent_py.domain import DomainError, Principal, TaskContract
     from agent_py.service import Service
 
@@ -68,19 +69,48 @@ def test_postgres_migrations_rls_and_concurrent_budget(tmp_path, monkeypatch):
         task = service.create_task(
             p, TaskContract(kind="repair", project="demo", goal="Test concurrency"), "key"
         )
-        for tenant in ("one", "two"):
-            with appdb.session(tenant) as s:
-                run = RepairRun(
-                    tenant_id=tenant,
-                    task_id=task.id,
-                    snapshot_id="fixture",
-                    source_digest="a" * 64,
-                    config_digest="b" * 64,
-                    max_attempts=2,
+        graphs = {
+            tenant: seed_graph(service, p.model_copy(update={"tenant_id": tenant}))
+            for tenant in ("one", "two")
+        }
+        # Rehearse a populated PostgreSQL rollback/upgrade; invalid legacy data must
+        # leave the schema revision unchanged, including under forced tenant RLS.
+        command.downgrade(Config("alembic.ini"), "0008_dependency_circuits")
+        from sqlalchemy.exc import IntegrityError
+
+        from agent_py.db import Outbox, uid
+
+        bad_id = uid()
+        with engine.begin() as c:
+            c.execute(
+                Outbox.__table__.insert().values(
+                    id=bad_id, tenant_id="one", task_id=graphs["two"]["tasks"], delivered=False
                 )
-                s.add(run)
-                s.flush()
-                s.add(RepairAttempt(tenant_id=tenant, run_id=run.id, ordinal=1))
+            )
+        with pytest.raises(RuntimeError, match="outbox.task_id: 1"):
+            command.upgrade(Config("alembic.ini"), "head")
+        with engine.begin() as c:
+            assert (
+                c.scalar(text("SELECT version_num FROM alembic_version"))
+                == "0008_dependency_circuits"
+            )
+            c.execute(text("DELETE FROM outbox WHERE id=:id"), {"id": bad_id})
+        command.upgrade(Config("alembic.ini"), "head")
+        command.check(Config("alembic.ini"))
+        # Even the migration administrator cannot commit an invalid reference.
+        with pytest.raises(IntegrityError):
+            with engine.begin() as c:
+                c.execute(
+                    Outbox.__table__.insert().values(
+                        tenant_id="one", task_id=graphs["two"]["tasks"], delivered=False
+                    )
+                )
+        for reference in REFERENCES:
+            reject_reference(appdb, "one", graphs["one"], reference, graphs["two"][reference[2]])
+            reject_reference(appdb, "one", graphs["one"], reference, "missing")
+        # Seeded fixtures have a work lease; remove them before admission counting below.
+        with engine.begin() as c:
+            c.execute(text("DELETE FROM work_leases"))
         with appdb.session("one") as s:
             assert s.execute(text("SELECT tenant_id FROM repair_runs")).scalars().all() == ["one"]
             assert s.execute(text("SELECT tenant_id FROM repair_attempts")).scalars().all() == [

@@ -2,7 +2,17 @@ import contextlib
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, DateTime, Integer, String, UniqueConstraint, create_engine, event, text
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    ForeignKeyConstraint,
+    Integer,
+    String,
+    UniqueConstraint,
+    create_engine,
+    event,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 
@@ -25,9 +35,27 @@ class Record(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
 
 
+def tenant_reference(table: str, column: str, parent: str):
+    """Commit-time integrity permits atomic parent/child inserts without ORM relationships."""
+    return ForeignKeyConstraint(
+        ["tenant_id", column],
+        [f"{parent}.tenant_id", f"{parent}.id"],
+        name=f"fk_{table}_{column}_tenant",
+        deferrable=True,
+        initially="DEFERRED",
+    )
+
+
+def tenant_identity(table: str):
+    return UniqueConstraint("tenant_id", "id", name=f"uq_{table}_tenant_id_id")
+
+
 class Task(Record):
     __tablename__ = "tasks"
-    __table_args__ = (UniqueConstraint("tenant_id", "request_key"),)
+    __table_args__ = (
+        tenant_identity("tasks"),
+        UniqueConstraint("tenant_id", "request_key"),
+    )
     request_key: Mapped[str] = mapped_column(String(160))
     request_digest: Mapped[str] = mapped_column(String(64))
     principal: Mapped[str] = mapped_column(String(160))
@@ -46,7 +74,11 @@ class Task(Record):
 
 class Operation(Record):
     __tablename__ = "operations"
-    __table_args__ = (UniqueConstraint("tenant_id", "task_id", "step_key"),)
+    __table_args__ = (
+        tenant_identity("operations"),
+        tenant_reference("operations", "task_id", "tasks"),
+        UniqueConstraint("tenant_id", "task_id", "step_key"),
+    )
     task_id: Mapped[str] = mapped_column(String(36), index=True)
     step_key: Mapped[str] = mapped_column(String(160))
     tool: Mapped[str] = mapped_column(String(40))
@@ -64,7 +96,10 @@ class Operation(Record):
 
 class Approval(Record):
     __tablename__ = "approvals"
-    __table_args__ = (UniqueConstraint("tenant_id", "operation_id"),)
+    __table_args__ = (
+        tenant_reference("approvals", "operation_id", "operations"),
+        UniqueConstraint("tenant_id", "operation_id"),
+    )
     operation_id: Mapped[str] = mapped_column(String(36))
     payload_digest: Mapped[str] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(30), default="PENDING")
@@ -74,7 +109,10 @@ class Approval(Record):
 
 class TaskEvent(Record):
     __tablename__ = "task_events"
-    __table_args__ = (UniqueConstraint("tenant_id", "task_id", "sequence"),)
+    __table_args__ = (
+        tenant_reference("task_events", "task_id", "tasks"),
+        UniqueConstraint("tenant_id", "task_id", "sequence"),
+    )
     task_id: Mapped[str] = mapped_column(String(36), index=True)
     sequence: Mapped[int] = mapped_column(Integer)
     event_type: Mapped[str] = mapped_column(String(60))
@@ -83,7 +121,10 @@ class TaskEvent(Record):
 
 class Outbox(Record):
     __tablename__ = "outbox"
-    __table_args__ = (UniqueConstraint("tenant_id", "task_id"),)
+    __table_args__ = (
+        tenant_reference("outbox", "task_id", "tasks"),
+        UniqueConstraint("tenant_id", "task_id"),
+    )
     task_id: Mapped[str] = mapped_column(String(36))
     delivered: Mapped[bool] = mapped_column(default=False)
 
@@ -99,6 +140,10 @@ class Inbox(Record):
 
 class Artifact(Record):
     __tablename__ = "artifacts"
+    __table_args__ = (
+        tenant_identity("artifacts"),
+        tenant_reference("artifacts", "task_id", "tasks"),
+    )
     task_id: Mapped[str] = mapped_column(String(36), index=True)
     kind: Mapped[str] = mapped_column(String(60))
     digest: Mapped[str] = mapped_column(String(64))
@@ -116,7 +161,10 @@ class Grant(Record):
 
 class Reservation(Record):
     __tablename__ = "reservations"
-    __table_args__ = (UniqueConstraint("tenant_id", "task_id", "call_key"),)
+    __table_args__ = (
+        tenant_reference("reservations", "task_id", "tasks"),
+        UniqueConstraint("tenant_id", "task_id", "call_key"),
+    )
     task_id: Mapped[str] = mapped_column(String(36))
     call_key: Mapped[str] = mapped_column(String(160))
     maximum: Mapped[int] = mapped_column(Integer)
@@ -144,6 +192,7 @@ class Policy(Record):
 
 class Document(Record):
     __tablename__ = "documents"
+    __table_args__ = (tenant_reference("documents", "task_id", "tasks"),)
     task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     project: Mapped[str] = mapped_column(String(80), index=True)
     source: Mapped[str] = mapped_column(String(300))
@@ -157,7 +206,12 @@ class Document(Record):
 
 class RepairRun(Record):
     __tablename__ = "repair_runs"
-    __table_args__ = (UniqueConstraint("tenant_id", "task_id"),)
+    __table_args__ = (
+        tenant_identity("repair_runs"),
+        tenant_reference("repair_runs", "task_id", "tasks"),
+        tenant_reference("repair_runs", "snapshot_id", "artifacts"),
+        UniqueConstraint("tenant_id", "task_id"),
+    )
     task_id: Mapped[str] = mapped_column(String(36))
     snapshot_id: Mapped[str] = mapped_column(String(36))
     source_digest: Mapped[str] = mapped_column(String(64))
@@ -168,7 +222,12 @@ class RepairRun(Record):
 
 class RepairAttempt(Record):
     __tablename__ = "repair_attempts"
-    __table_args__ = (UniqueConstraint("tenant_id", "run_id", "ordinal"),)
+    __table_args__ = (
+        tenant_reference("repair_attempts", "run_id", "repair_runs"),
+        tenant_reference("repair_attempts", "patch_artifact_id", "artifacts"),
+        tenant_reference("repair_attempts", "verification_artifact_id", "artifacts"),
+        UniqueConstraint("tenant_id", "run_id", "ordinal"),
+    )
     run_id: Mapped[str] = mapped_column(String(36))
     ordinal: Mapped[int] = mapped_column(Integer)
     state: Mapped[str] = mapped_column(String(40), default="GENERATING")
@@ -192,7 +251,10 @@ class AdmissionGate(Record):
 
 class WorkLease(Record):
     __tablename__ = "work_leases"
-    __table_args__ = (UniqueConstraint("tenant_id", "task_id"),)
+    __table_args__ = (
+        tenant_reference("work_leases", "task_id", "tasks"),
+        UniqueConstraint("tenant_id", "task_id"),
+    )
     task_id: Mapped[str] = mapped_column(String(36))
     owner_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
     enqueued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
