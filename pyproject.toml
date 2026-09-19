@@ -1,0 +1,34 @@
+[project]
+name = "agent-py"
+version = "0.1.0"
+description = "Durable, evidence-driven development and operations agent"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+  "fastapi>=0.115,<1", "uvicorn>=0.30,<1", "pydantic-settings>=2.6,<3",
+  "sqlalchemy>=2.0.36,<3", "alembic>=1.14,<2", "psycopg[binary]>=3.2,<4",
+  "httpx>=0.28,<1", "pyjwt[crypto]>=2.10,<3", "temporalio>=1.9,<2",
+  "typer>=0.15,<1", "opentelemetry-api>=1.30,<2",
+  "opentelemetry-sdk>=1.30,<2", "prometheus-client>=0.21,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3,<10", "hypothesis>=6.120,<7", "ruff>=0.11,<1"]
+
+[project.scripts]
+agent-py = "agent_py.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: requires PostgreSQL or Temporal", "sandbox: requires Docker"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+

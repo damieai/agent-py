@@ -1,0 +1,14 @@
+.venv/
+.cache/
+.runtime/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+.env
+node_modules/
+dist/
+*.db
+*.db-shm
+*.db-wal
+
