@@ -138,17 +138,65 @@ class Service:
                     "Only the task owner may cancel; takeover requires operator role",
                     403,
                 )
-            if (
-                t.status == "TERMINATED"
-                or (t.cancelled and not takeover)
-                or (t.taken_over and takeover)
-            ):
+            if t.status == "TERMINATED" or t.cancelled or (t.taken_over and takeover):
                 return
-            t.cancelled = not takeover
-            t.taken_over = takeover
-            t.status = "WAITING" if takeover else "CANCELLING"
-            t.waiting_reason = "HUMAN_TAKEOVER" if takeover else "RECONCILIATION"
+            changed = s.execute(
+                update(Task)
+                .where(
+                    Task.id == task_id,
+                    Task.tenant_id == p.tenant_id,
+                    Task.cancelled.is_(False),
+                    Task.status != "TERMINATED",
+                    Task.version == t.version,
+                )
+                .values(
+                    cancelled=not takeover,
+                    taken_over=takeover,
+                    status="WAITING" if takeover else "CANCELLING",
+                    waiting_reason="HUMAN_TAKEOVER" if takeover else "RECONCILIATION",
+                    version=Task.version + 1,
+                )
+            )
+            if changed.rowcount != 1:
+                raise DomainError("TASK_CHANGED", "Task changed; refresh before retrying")
             emit(s, t, "task.takeover" if takeover else "task.cancelled", {})
+
+    def resume(self, p: Principal, task_id: str, expected_version: int):
+        with self.db.session(p.tenant_id) as s:
+            t = tenant_get(s, Task, task_id, p.tenant_id, True)
+            authorize(s, p, t, "operator")
+            if t.version != expected_version:
+                raise DomainError("TASK_CHANGED", "Task version changed; refresh before resuming")
+            if t.cancelled or t.status == "TERMINATED":
+                raise DomainError("TASK_STOPPED", "Cancelled or terminated tasks cannot resume")
+            if not t.taken_over:
+                return t
+            if aware(t.deadline) <= now():
+                raise DomainError("DEADLINE", "Resume cannot extend the original deadline")
+            check_grant(
+                s, t.tenant_id, t.principal, t.contract["project"], t.contract["environment"]
+            )
+            policy = s.scalar(select(Policy).where(Policy.tenant_id == p.tenant_id))
+            if policy and policy.stopped:
+                raise DomainError("EMERGENCY_STOP", "Tenant dispatch is disabled", 403)
+            changed = s.execute(
+                update(Task)
+                .where(
+                    Task.id == task_id,
+                    Task.tenant_id == p.tenant_id,
+                    Task.version == expected_version,
+                    Task.cancelled.is_(False),
+                    Task.taken_over.is_(True),
+                    Task.status != "TERMINATED",
+                )
+                .values(
+                    taken_over=False, status="QUEUED", waiting_reason=None, version=Task.version + 1
+                )
+            )
+            if changed.rowcount != 1:
+                raise DomainError("TASK_CHANGED", "Task changed; refresh before resuming")
+            emit(s, t, "task.resumed", {"actor": p.subject, "version": expected_version + 1})
+            return t
 
     def propose(self, p: Principal, task_id: str, step: str, action: ActionProposal) -> Operation:
         validate_parameters(action.tool, action.parameters)
@@ -322,11 +370,13 @@ class Service:
                 return op
             if op.status == "FAILED" and status != "SUCCEEDED":
                 return op
+            if op.status == "UNKNOWN" and status == "UNKNOWN":
+                return op  # Preserve the first uncertainty timestamp and escalation state.
             values = dict(
                 status=status,
                 result=result,
                 error=error,
-                updated_at=now(),
+                updated_at=op.updated_at if status == "UNKNOWN" else now(),
                 recovery_status="RECONCILING" if status == "UNKNOWN" else None,
             )
             if result:
@@ -344,7 +394,8 @@ class Service:
                 return op
             t = tenant_get(s, Task, op.task_id, tenant, True)
             if status == "UNKNOWN":
-                t.status, t.waiting_reason = "WAITING", "RECONCILIATION"
+                if not t.taken_over and not t.cancelled and t.status != "TERMINATED":
+                    t.status, t.waiting_reason = "WAITING", "RECONCILIATION"
             emit(s, t, "operation." + status.lower(), {"operation_id": op.id, "error": error})
             return op
 
@@ -357,6 +408,31 @@ class Service:
         if result is None:
             return self._record(tenant, operation_id, "UNKNOWN", None, "NOT_YET_CONFIRMED")
         return self._record(tenant, operation_id, "SUCCEEDED", result)
+
+    def escalate_uncertain(self, tenant: str, operation_id: str):
+        with self.db.session(tenant) as s:
+            changed = s.execute(
+                update(Operation)
+                .where(
+                    Operation.id == operation_id,
+                    Operation.tenant_id == tenant,
+                    Operation.status.in_(["PENDING", "UNKNOWN"]),
+                    Operation.updated_at <= now() - timedelta(minutes=15),
+                    (Operation.recovery_status.is_(None))
+                    | (Operation.recovery_status != "MANUAL_REVIEW"),
+                )
+                .values(recovery_status="MANUAL_REVIEW")
+                .execution_options(synchronize_session="fetch")
+            )
+            if changed.rowcount != 1:
+                return
+            op = tenant_get(s, Operation, operation_id, tenant)
+            t = tenant_get(s, Task, op.task_id, tenant, True)
+            if not t.cancelled and not t.taken_over and t.status != "TERMINATED":
+                t.status, t.waiting_reason = "WAITING", "MANUAL_REVIEW"
+            emit(
+                s, t, "operation.escalated", {"operation_id": op.id, "reason": "UNCONFIRMED_15_MIN"}
+            )
 
     def reserve(self, tenant: str, task_id: str, call_key: str, maximum: int):
         if maximum <= 0:

@@ -103,6 +103,8 @@ agent-py analyze TASK_ID INPUT_MICRO_USD_PER_TOKEN OUTPUT_MICRO_USD_PER_TOKEN --
 
 - HTTP 请求、模型推理和业务动作使用不同的身份及幂等记录。
 - UNKNOWN 保留原动作身份，通过独立 Reconciler 查询外部权威状态。
+- 未确认动作超过 15 分钟标记 `MANUAL_REVIEW`，继续对账，不自行判定失败。当前只记录事件和工作台状态，未接入外部值班通知。
+- 人工接管可通过工作台或 `POST /api/v1/tasks/{id}/resume` 恢复，请求带 `expected_version`；恢复不延长截止时间、不重置预算，取消任务不能恢复。
 - 审批绑定参数摘要，执行时复核批准人和发起人的当前资源授权。
 - 数据库 RLS 在 PostgreSQL 中强制启用；生产启动拒绝超级用户、BYPASSRLS 和表所有者。
 - 沙盒必须使用 digest 固定的容器镜像，没有宿主机执行不可信代码的降级路径。

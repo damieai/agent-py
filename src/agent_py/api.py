@@ -24,6 +24,8 @@ def task_json(t):
         "result": t.result,
         "waiting_reason": t.waiting_reason,
         "cancelled": t.cancelled,
+        "taken_over": t.taken_over,
+        "version": t.version,
         "spent_micro_usd": t.spent,
         "reserved_micro_usd": t.reserved,
         "created_at": t.created_at.isoformat(),
@@ -50,6 +52,11 @@ class ProposalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     step_key: str = Field(min_length=1, max_length=160)
     action: ActionProposal
+
+
+class ResumeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    expected_version: int = Field(ge=1)
 
 
 def create_app(
@@ -165,6 +172,10 @@ def create_app(
     @app.post("/api/v1/tasks/{task_id}/proposals", status_code=201)
     def propose(task_id: str, body: ProposalRequest, p: Auth):
         return operation_json(service.propose(p, task_id, body.step_key, body.action))
+
+    @app.post("/api/v1/tasks/{task_id}/resume")
+    def resume(task_id: str, body: ResumeRequest, p: Auth):
+        return task_json(service.resume(p, task_id, body.expected_version))
 
     @app.post("/api/v1/approvals/{approval_id}/decisions")
     def decide(approval_id: str, body: ApprovalDecision, p: Auth):

@@ -9,8 +9,9 @@ import json
 from sqlalchemy import select
 
 from agent_py.artifacts import ArtifactStore
-from agent_py.db import Approval, Operation, Task, tenant_get
+from agent_py.db import Approval, Operation, Task, now, tenant_get
 from agent_py.domain import ActionProposal, DomainError, Principal, digest
+from agent_py.service import aware
 
 
 class SimulationHarness:
@@ -126,8 +127,13 @@ class SimulationHarness:
                                 Approval.tenant_id == tenant, Approval.operation_id == op.id
                             )
                         )
-                    if approval.status == "REJECTED":
-                        self.service._record(tenant, op.id, "FAILED", None, "APPROVAL_REJECTED")
+                    if approval.status == "REJECTED" or aware(approval.expires_at) <= now():
+                        reason = (
+                            "APPROVAL_REJECTED"
+                            if approval.status == "REJECTED"
+                            else "APPROVAL_EXPIRED"
+                        )
+                        self.service._record(tenant, op.id, "FAILED", None, reason)
                         self.service.finish(tenant, task_id)
                         return {"done": True, "result": "FAILED"}
                     return {"done": False, "wait": "APPROVAL", "approval_id": approval.id}

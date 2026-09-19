@@ -23,7 +23,7 @@ class InvestigationHarness:
             if task.status == "TERMINATED":
                 return {"done": True, "result": task.result}
             if task.taken_over:
-                return {"done": True, "wait": "HUMAN_TAKEOVER"}
+                return {"done": False, "wait": "HUMAN_TAKEOVER"}
             if not task.cancelled:
                 service._executable(s, task)
         if task.cancelled:
@@ -95,12 +95,16 @@ class InvestigationHarness:
         with service.db.session(tenant) as s:
             current = tenant_get(s, Task, task_id, tenant, True)
             if current.cancelled or current.taken_over or current.status == "TERMINATED":
-                return {"done": True, "wait": "TASK_STOPPED", "artifact_id": artifact.id}
+                return {
+                    "done": current.status == "TERMINATED",
+                    "wait": "TASK_STOPPED",
+                    "artifact_id": artifact.id,
+                }
             if current.waiting_reason != "HUMAN_REVIEW":
                 current.status, current.waiting_reason = "WAITING", "HUMAN_REVIEW"
                 emit(s, current, "investigation.completed", {"artifact_id": artifact.id})
-        # Analysis is complete; business repair/recovery is not claimed as SUCCESS.
-        return {"done": True, "wait": "HUMAN_REVIEW", "artifact_id": artifact.id}
+        # Keep the workflow alive for cancellation/takeover; analysis is not business SUCCESS.
+        return {"done": False, "wait": "HUMAN_REVIEW", "artifact_id": artifact.id}
 
 
 def build_harness(service):

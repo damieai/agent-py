@@ -46,10 +46,12 @@ class Activities:
             with self.service.db.session(tenant) as s:
                 t = tenant_get(s, Task, task_id, tenant, True)
                 if not t.cancelled and not t.taken_over and t.status != "TERMINATED":
-                    t.status, t.waiting_reason = "WAITING", exc.code
-                    emit(s, t, "task.blocked", {"reason": exc.code})
+                    if t.status != "WAITING" or t.waiting_reason != exc.code:
+                        t.status, t.waiting_reason = "WAITING", exc.code
+                        emit(s, t, "task.blocked", {"reason": exc.code})
+                done = t.status == "TERMINATED"
             # All in-flight operations remain visible to the independent reconciler.
-            return {"done": True, "blocked": exc.code}
+            return {"done": done, "wait": exc.code, "blocked": exc.code}
 
 
 def build_service(settings: Settings) -> Service:
@@ -102,6 +104,8 @@ def reconcile_once(service: Service, tenant: str):
             import logging
 
             logging.getLogger(__name__).exception("Reconciliation failed for operation %s", op.id)
+        finally:
+            service.escalate_uncertain(tenant, op.id)
 
 
 async def serve_worker(settings: Settings):

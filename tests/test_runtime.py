@@ -32,7 +32,8 @@ def test_temporal_runs_until_approval(env, task):
     from agent_py.db import Approval, Task
 
     async def scenario():
-        service, _, reviewer = env
+        service, owner, reviewer = env
+        service.stop(owner, task.id, takeover=True)
         async with await WorkflowEnvironment.start_local() as runtime:
             async with Worker(
                 runtime.client,
@@ -46,6 +47,16 @@ def test_temporal_runs_until_approval(env, task):
                     id=task.id,
                     task_queue="test",
                 )
+                await asyncio.sleep(3)
+                from agent_py.db import Operation
+
+                with service.db.session("t1") as s:
+                    assert (
+                        s.scalar(select(Operation.id).where(Operation.task_id == task.id)) is None
+                    )
+                current = service.get_task(owner, task.id)
+                assert current.taken_over
+                service.resume(owner, task.id, current.version)
                 for _ in range(90):
                     with service.db.session("t1") as s:
                         pending = list(
