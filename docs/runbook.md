@@ -54,3 +54,7 @@
 ## 事件流与审计导出
 
 工作台时间线断线后会自动按序号续传；凭证过期或撤权时停止并清空面板。历史缺口需检查数据库，不能静默跳过。运维可下载 v2 审计包，在离线环境执行 `agent-py audit-check`，区分内部一致性、未确认动作与真实远端验证。配置边界及回放示例见[审计说明](audit-replay.md)。
+
+## 企业证据采集依赖
+
+升级 `0008_dependency_circuits` 后，用 `agent-py dependency-status TENANT` 查看共享熔断。`DEPENDENCY_OPEN` 表示冷却或探测期间等待；先检查供应商健康及 Retry-After，再决定是否执行 `dependency-reset TENANT HASH`。不要删除状态行，避免丢失旧许可隔离信息。完整策略和监控见[依赖故障治理](dependency-resilience.md)。

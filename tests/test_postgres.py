@@ -170,6 +170,32 @@ def test_postgres_migrations_rls_and_concurrent_budget(tmp_path, monkeypatch):
             ]
         audit = export_audit(service, p, task.id)
         assert check_recording(audit)["event_count"] == before + 1
+        from agent_py.resilience import acquire as acquire_read
+        from agent_py.resilience import complete as complete_read
+
+        for _ in range(3):
+            complete_read(
+                service, acquire_read(service, "one", "fixture", "jenkins_build"), "failure"
+            )
+        with pytest.raises(DomainError, match="cooling"):
+            acquire_read(service, "one", "fixture", "jenkins_build")
+        assert acquire_read(service, "two", "fixture", "jenkins_build")
+        with appdb.session("one") as s:
+            assert s.execute(text("SELECT tenant_id FROM dependency_circuits")).scalars().all() == [
+                "one"
+            ]
+            s.execute(text("UPDATE dependency_circuits SET retry_at = now() - interval '1 second'"))
+
+        def probe(_):
+            try:
+                return acquire_read(service, "one", "fixture", "jenkins_build")
+            except DomainError:
+                return None
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            probes = [p for p in pool.map(probe, range(4)) if p]
+        assert len(probes) == 1 and probes[0].probe_token
+        complete_read(service, probes[0], "success")
     finally:
         get_settings.cache_clear()
         if appdb:

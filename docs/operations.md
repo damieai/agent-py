@@ -4,7 +4,7 @@
 
 ## 启动与配置
 
-1. 使用迁移身份执行 `.venv/bin/alembic upgrade head`，当前版本为 `0007_worker_admission`。PostgreSQL 应用角色须拥有新表的读写权限，且不能是表所有者或绕过 RLS 的角色。
+1. 使用迁移身份执行 `.venv/bin/alembic upgrade head`，当前版本为 `0008_dependency_circuits`。PostgreSQL 应用角色须拥有新表的读写权限，且不能是表所有者或绕过 RLS 的角色。
 2. 按 `.env.example` 配置 API、Dispatcher 和 Worker。API 实例的 `AGENT_MAX_QUEUE_PER_TENANT` 必须一致；创建任务会在租户锁内检查队列容量和幂等键。
 3. 启动 `agent-py api`、`agent-py dispatcher --tenant demo`、`agent-py worker`。首次 Worker 准入将 `AGENT_MAX_ACTIVE_PER_TENANT` 写入共享策略，后续以数据库值为准。
 4. 运维可执行 `agent-py admission-limit demo 4` 修改租户上限。降低上限保留已运行租约，只阻止后续超额领取。此命令是持有数据库配置的本地管理入口，应限制主机访问权限。
@@ -47,3 +47,5 @@ API 返回 `X-Trace-ID`，同一 span 中写入的任务事件携带 trace ID。
 | 预算预留不释放 | 查询推理回执及 UNKNOWN 身份；没有权威证据时不能把未知费用清零 |
 
 示例告警阈值是运维起点，尚未证明目标 SLO。生产上线仍需负载测试、告警送达演练、账单校准、迁移回滚和备份恢复。
+
+企业证据读取增加共享熔断与重试指标，已加入告警及 Grafana 模板；租户级数据库 gauge 继续按 max 聚合。具体恢复命令和界限见[依赖故障治理](dependency-resilience.md)。

@@ -57,6 +57,7 @@ def test_scoped_collection_deduplicates_and_excludes_build_secrets(env, task, mo
     ids = reader.collect(env[1], task.id)
     assert reader.collect(env[1], task.id) == ids
     assert len(requests) == 2 and all(r.method == "GET" for r in requests)
+    assert all("parameters" not in r.url.params.get("tree", "") for r in requests)
     with env[0].db.session("t1") as s:
         assert s.scalar(select(func.count()).select_from(Document)) == 1
         doc = s.get(Document, ids[0])

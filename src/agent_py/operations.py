@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 
 from agent_py.db import (
     AdmissionGate,
+    DependencyCircuit,
     Grant,
     Operation,
     Outbox,
@@ -167,7 +168,25 @@ def prometheus_snapshot(service):
         ["tenant"],
         registry=registry,
     )
+    circuits = Gauge(
+        "agent_dependency_circuits",
+        "Shared enterprise read circuit counts",
+        ["tenant", "provider", "state"],
+        registry=registry,
+    )
     for tenant in dict.fromkeys(service.settings.monitoring_tenants):
+        with service.db.session(tenant) as s:
+            counts = {
+                (provider, state): count
+                for provider, state, count in s.execute(
+                    select(DependencyCircuit.provider, DependencyCircuit.state, func.count())
+                    .where(DependencyCircuit.tenant_id == tenant)
+                    .group_by(DependencyCircuit.provider, DependencyCircuit.state)
+                )
+            }
+        for provider in ("bitbucket_pr", "jira_issue", "jenkins_build", "kubernetes_deployment"):
+            for state in ("CLOSED", "OPEN", "HALF_OPEN"):
+                circuits.labels(tenant, provider, state).set(counts.get((provider, state), 0))
         data = summary(service, tenant)
         for state in ("QUEUED", "RUNNING", "WAITING", "CANCELLING", "TERMINATED"):
             tasks.labels(tenant, state).set(data["tasks"].get(state, 0))

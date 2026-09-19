@@ -152,6 +152,28 @@
           "legendFormat": "{{tenant}} {{state}} {{route}} {{result}}"
         }
       ]
+    },
+    {
+      "id": 7,
+      "title": "Shared enterprise read circuits",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 24,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (tenant, provider, state) (agent_dependency_circuits)",
+          "legendFormat": "{{tenant}} {{provider}} {{state}}"
+        }
+      ]
     }
   ]
 }

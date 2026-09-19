@@ -199,6 +199,19 @@ class WorkLease(Record):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
+class DependencyCircuit(Record):
+    __tablename__ = "dependency_circuits"
+    __table_args__ = (UniqueConstraint("tenant_id", "dependency"),)
+    dependency: Mapped[str] = mapped_column(String(64))
+    provider: Mapped[str] = mapped_column(String(40))
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    generation: Mapped[int] = mapped_column(Integer, default=0)
+    failures: Mapped[int] = mapped_column(Integer, default=0)
+    state: Mapped[str] = mapped_column(String(20), default="CLOSED")
+    retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    probe_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+
+
 class Database:
     def __init__(self, url: str):
         if url.startswith("sqlite:///", 0) and ":memory:" not in url:

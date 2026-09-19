@@ -72,6 +72,12 @@ class Telemetry:
         self.ticks = Counter(
             "agent_worker_ticks_total", "Worker tick results", ["result"], registry=self.registry
         )
+        self.reads = Counter(
+            "agent_enterprise_reads_total",
+            "Enterprise read attempt outcomes",
+            ["provider", "result"],
+            registry=self.registry,
+        )
         self.tick_duration = Histogram(
             "agent_worker_tick_duration_seconds", "Worker tick wall time", registry=self.registry
         )

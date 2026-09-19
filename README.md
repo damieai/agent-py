@@ -132,3 +132,7 @@ Worker 已接入数据库共享的租户并发上限、FIFO 等待票据和过�
 ## 事件时间线与审计
 
 工作台支持带凭证的 SSE 事件续传、流中授权复核及审计包下载。`agent-py export TASK_ID audit.json` 导出 v2 一致性快照，`agent-py audit-check audit.json` 离线检查事件、审批和动作回执；v2 回放额外约束租户与派发顺序。包摘要不等于真实性或远端状态证明，详见[审计与回放说明](docs/audit-replay.md)。
+
+## 企业读取故障治理
+
+企业证据 GET 已接入数据库共享熔断、有界重试、Retry-After 冷却和单 Worker 半开探测。每次重试重新校验任务授权与取消，旧许可无法覆盖恢复后的熔断状态。先升级数据库至 `0008_dependency_circuits`；查看、恢复和部署限制见[依赖故障治理](docs/dependency-resilience.md)。该策略不重发付费模型或外部写动作。

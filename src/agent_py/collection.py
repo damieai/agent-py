@@ -45,6 +45,17 @@ class CollectionManifest(Contract):
 
 
 def project_response(provider: str, data: dict):
+    required_objects = (
+        ("metadata", "spec", "status")
+        if provider == "kubernetes_deployment"
+        else ("fields",)
+        if provider == "jira_issue"
+        else ()
+    )
+    if any(key in data and not isinstance(data[key], dict) for key in required_objects):
+        raise DomainError(
+            "EVIDENCE_SCHEMA", "Enterprise evidence contains invalid object fields", 502
+        )
     # Never ingest entire build parameters or pod specs: they may contain credentials.
     fields = {
         "bitbucket_pr": ("id", "title", "description", "state", "updated_on"),
@@ -107,22 +118,28 @@ class EvidenceCollector:
             raise DomainError("SOURCE_SCOPE", "No enterprise sources authorized for this task", 403)
         collected = []
         for source in sources:
-            # Recheck revocation and cancellation before each external read.
-            with self.service.db.session(principal.tenant_id) as s:
-                current = tenant_get(s, Task, task_id, principal.tenant_id)
-                authorize(s, principal, current)
-                self.service._executable(s, current)
-            token = os.environ.get(source.token_env, "")
-            username = os.environ.get(source.username_env, "") if source.username_env else None
-            if not token or (source.username_env and not username):
-                raise DomainError(
-                    "CONNECTOR_CREDENTIALS", "Configured connector credentials missing", 503
-                )
-            client = self.client_factory(source.base_url, token, username=username)
-            try:
-                data = getattr(client, source.provider)(**source.parameters)
-            finally:
-                client.close()
+            from agent_py.resilience import read_with_policy
+
+            def reauthorize():
+                with self.service.db.session(principal.tenant_id) as s:
+                    current = tenant_get(s, Task, task_id, principal.tenant_id)
+                    authorize(s, principal, current)
+                    self.service._executable(s, current)
+
+            def read():
+                token = os.environ.get(source.token_env, "")
+                username = os.environ.get(source.username_env, "") if source.username_env else None
+                if not token or (source.username_env and not username):
+                    raise DomainError(
+                        "CONNECTOR_CREDENTIALS", "Configured connector credentials missing", 503
+                    )
+                client = self.client_factory(source.base_url, token, username=username)
+                try:
+                    return getattr(client, source.provider)(**source.parameters)
+                finally:
+                    client.close()
+
+            data = read_with_policy(self.service, principal, source, read, reauthorize)
             payload = project_response(source.provider, data)
             body = json.dumps(
                 {

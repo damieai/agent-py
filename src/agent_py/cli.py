@@ -138,6 +138,45 @@ def admission_limit(tenant: str, limit: int):
 
 
 @app.command()
+def dependency_reset(tenant: str, dependency: str):
+    """Local operator override after checking provider health or correcting rate-limit policy."""
+    from agent_py.resilience import reset_circuit
+
+    reset_circuit(build_service(get_settings()), tenant, dependency)
+    typer.echo("Circuit reset; previous permits cannot change the new generation.")
+
+
+@app.command()
+def dependency_status(tenant: str):
+    """Local operator view of shared enterprise read circuit state; no credential values."""
+    from agent_py.db import DependencyCircuit
+
+    service = build_service(get_settings())
+    with service.db.session(tenant) as s:
+        rows = s.scalars(
+            select(DependencyCircuit)
+            .where(DependencyCircuit.tenant_id == tenant)
+            .order_by(DependencyCircuit.provider, DependencyCircuit.dependency)
+        ).all()
+        typer.echo(
+            json.dumps(
+                [
+                    {
+                        "dependency": row.dependency,
+                        "provider": row.provider,
+                        "state": row.state,
+                        "failures": row.failures,
+                        "generation": row.generation,
+                        "retry_at": row.retry_at.isoformat() if row.retry_at else None,
+                    }
+                    for row in rows
+                ],
+                indent=2,
+            )
+        )
+
+
+@app.command()
 def ops_status():
     """Show grant-scoped operational state for the local demo operator."""
     from agent_py.operations import summary

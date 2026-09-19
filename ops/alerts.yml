@@ -1,6 +1,14 @@
 groups:
   - name: agent-runtime
     rules:
+      - alert: AgentEnterpriseDependencyOpen
+        expr: max by (tenant, provider) (agent_dependency_circuits{state="OPEN"}) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Enterprise reader circuit open for {{ $labels.provider }} in {{ $labels.tenant }}'
+          description: 'Inspect dependency-status and provider rate limits before resetting the circuit.'
       - alert: AgentUnconfirmedAction
         expr: max by (tenant) (agent_oldest_unconfirmed_seconds) > 900
         for: 2m

@@ -5,8 +5,8 @@
 | 检查 | 命令 | 结果 |
 |---|---|---|
 | 静态检查及格式 | `make check` | 通过，包含迁移文件 |
-| 默认测试 | `.venv/bin/pytest -q` | 159 通过；4 个基础设施测试默认跳过 |
-| PostgreSQL | `AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q` | 1 通过：迁移、非特权角色 RLS、并发预算、共享准入、运维聚合、分块检索及并发审计快照 |
+| 默认测试 | `.venv/bin/pytest -q` | 179 通过；4 个基础设施测试默认跳过 |
+| PostgreSQL | `AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q` | 1 通过：迁移、非特权角色 RLS、并发预算、共享准入、运维聚合、分块检索、并发审计快照及共享熔断 |
 | Temporal | `AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_runtime.py -q` | 2 通过：Outbox 与本地服务工作流 |
 | Temporal 候选修复 | `AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_repair_workflow.py -m integration -q` | 1 通过：冻结输入到人工审阅，再取消；模型/容器为测试适配器 |
 | 前端 | `npm --prefix web run build` | TypeScript 检查与 Vite 构建通过 |
@@ -30,6 +30,8 @@
 证据检索里程碑新增 19 项默认用例，覆盖 Python 装饰器/CRLF 行号、无执行解析、非法 Python 回退、超长片段预算、私有及跨租户证据不影响排名、中文/标识符/来源匹配、罕见词排名、原文变化使片段失效、伪造片段拒绝、语料容量限制、预览 API 鉴权、离线评测重现、两种策略下推理恢复与修复快照兼容、调用前撤权和切换策略不重复付费。原生 PostgreSQL 新增 RLS 下流式读取与 AST 片段校验（1 项，1.53 秒）；真实 Temporal 的新版上下文候选修复—审阅—取消通过（1 项，22.73 秒），模型和容器仍使用测试适配器。TypeScript/Vite 构建通过。离线 12 个手写开发查询中，无检索/lexical/bm25_rrf 的 recall 与 MRR 分别为 0/0.833/1.000，不代表真实答案质量或泛化；命令、数据与限制见[检索说明](retrieval.md)。本轮没有数据表变更。
 
 事件时间线与审计里程碑新增 19 项默认用例。覆盖 v2 导出与严格回放、租户/顺序/重复/未消费完检查、整数和布尔参数区分、摘要及重新计算摘要后的内部矛盾、审批/回执/次数/终止清单、UNKNOWN 不伪造成功、取消和拒绝历史、下载权限、SSE 续传/终止/超前游标/历史缺口、流中撤权、JWT 过期、离线 CLI 和畸形 JSON 内容。默认套件 159 项通过（13.23 秒）。真实 PostgreSQL 并发取消验证 REPEATABLE READ 快照仍读取原事件视图，结束后导出新版本，RLS 保持有效（1 项，1.72 秒）。7 项 Node 测试覆盖逐分片 CRLF、跨字节中文、重复/跳号、帧上限、取消 pending read、半帧断线及格式拒绝，已加入 CI；TypeScript/Vite 构建通过。本轮没有数据表迁移，也没有浏览器 E2E 或外部真实性签名验收。
+
+企业读取故障治理里程碑新增 20 项默认用例：共享熔断与服务实例重建、租户/来源隔离、多 Worker 单半开探测、旧回执/过期许可隔离、最多三次重试、取消复核、软时间预算、429 共享冷却、永久错误、无效/非标准 JSON、投影字段结构、其他 Worker 打开后停止本地重试、人工 reset、传输错误消息及监控租户范围。Jenkins 请求新增不读取构建参数的断言。原生 PostgreSQL 完整迁移、非特权角色下新表 RLS 和四连接探测竞争通过（1 项，1.50 秒）；SQLite 升级至 `0008_dependency_circuits`，Alembic schema 检查无差异。依赖状态 CLI 通过，监控 YAML/JSON 可解析；供应商网络故障使用 HTTP Mock，实际企业故障和告警送达未验收。
 
 测试执行需要本地线程和 socket 权限。当前环境中受限执行会阻塞 TestClient，因此完整套件及基础设施测试在获得执行权限后运行。测试还有两条第三方 Starlette/AnyIO 弃用警告，不影响断言结果。
 
