@@ -1,6 +1,14 @@
 groups:
   - name: agent-runtime
     rules:
+      - alert: AgentEnterpriseReadCapacity
+        expr: sum by (provider) (rate(agent_enterprise_reads_total{result="capacity"}[5m])) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Sustained read capacity refusal for {{ $labels.provider }}'
+          description: 'Inspect dependency-status and upstream latency; do not raise limits without checking provider quotas.'
       - alert: AgentEnterpriseDependencyOpen
         expr: max by (tenant, provider) (agent_dependency_circuits{state="OPEN"}) > 0
         for: 5m

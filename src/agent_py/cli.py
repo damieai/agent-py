@@ -148,32 +148,19 @@ def dependency_reset(tenant: str, dependency: str):
 
 @app.command()
 def dependency_status(tenant: str):
-    """Local operator view of shared enterprise read circuit state; no credential values."""
-    from agent_py.db import DependencyCircuit
+    """Local operator view of shared circuit state and active read slots; no credentials."""
+    from agent_py.resilience import dependency_status as snapshot
 
-    service = build_service(get_settings())
-    with service.db.session(tenant) as s:
-        rows = s.scalars(
-            select(DependencyCircuit)
-            .where(DependencyCircuit.tenant_id == tenant)
-            .order_by(DependencyCircuit.provider, DependencyCircuit.dependency)
-        ).all()
-        typer.echo(
-            json.dumps(
-                [
-                    {
-                        "dependency": row.dependency,
-                        "provider": row.provider,
-                        "state": row.state,
-                        "failures": row.failures,
-                        "generation": row.generation,
-                        "retry_at": row.retry_at.isoformat() if row.retry_at else None,
-                    }
-                    for row in rows
-                ],
-                indent=2,
-            )
-        )
+    typer.echo(json.dumps(snapshot(build_service(get_settings()), tenant), indent=2))
+
+
+@app.command()
+def dependency_limit(tenant: str, dependency: str, limit: int):
+    """Update a shared dependency limit without releasing or cancelling in-flight reads."""
+    from agent_py.resilience import set_read_limit
+
+    set_read_limit(build_service(get_settings()), tenant, dependency, limit)
+    typer.echo("Shared read limit updated; existing leases remain counted until release or expiry.")
 
 
 @app.command()

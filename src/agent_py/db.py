@@ -6,6 +6,7 @@ from sqlalchemy import (
     JSON,
     DateTime,
     ForeignKeyConstraint,
+    Index,
     Integer,
     String,
     UniqueConstraint,
@@ -272,6 +273,21 @@ class DependencyCircuit(Record):
     state: Mapped[str] = mapped_column(String(20), default="CLOSED")
     retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     probe_token: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    max_in_flight: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
+class DependencyReadLease(Record):
+    __tablename__ = "dependency_read_leases"
+    __table_args__ = (
+        Index("ix_dependency_read_leases_scope_expiry", "tenant_id", "dependency", "expires_at"),
+        ForeignKeyConstraint(
+            ["tenant_id", "dependency"],
+            ["dependency_circuits.tenant_id", "dependency_circuits.dependency"],
+            name="fk_dependency_read_leases_circuit_tenant",
+        ),
+    )
+    dependency: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 
 class Database:

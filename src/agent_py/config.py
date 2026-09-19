@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     max_queue_per_tenant: int = Field(default=100, ge=1, le=10000)
     worker_lease_seconds: int = Field(default=360, ge=330, le=900)
     worker_activity_limit: int = Field(default=8, ge=1, le=128)
+    max_reads_per_dependency: int = Field(default=4, ge=1, le=128)
     metrics_secret: SecretStr = SecretStr("")
     monitoring_tenants: list[str] = Field(default_factory=list, max_length=100)
     trace_file: Path | None = None

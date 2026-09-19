@@ -1,10 +1,10 @@
 # 企业只读依赖故障治理
 
-证据采集现在默认通过数据库共享熔断与有界重试。范围只包括清单授权的 Bitbucket PR、Jira Issue、Jenkins Build 和 Kubernetes Deployment GET；没有给付费模型、PR/部署写入或 UNKNOWN 动作增加自动重发。
+证据采集现在默认通过数据库共享熔断、读取并发名额与有界重试。范围只包括清单授权的 Bitbucket PR、Jira Issue、Jenkins Build 和 Kubernetes Deployment GET；没有给付费模型、PR/部署写入或 UNKNOWN 动作增加自动重发。
 
 ## 部署与共享状态
 
-先执行 `.venv/bin/alembic upgrade head` 升级到 `0008_dependency_circuits`。PostgreSQL 应用角色需要新表的 SELECT/INSERT/UPDATE 权限，并继续受 FORCE RLS 约束。滚动发布期间旧 Worker 不使用该策略，应排空旧 Worker 后再依赖共享熔断保证。
+先执行 `.venv/bin/alembic upgrade head` 升级到 `0010_dependency_bulkhead`。PostgreSQL 应用角色需要 dependency_circuits 的 SELECT/INSERT/UPDATE 权限，以及新表 dependency_read_leases 的 SELECT/INSERT/UPDATE/DELETE 权限，并继续受 FORCE RLS 约束。滚动发布期间旧 Worker 不使用该策略，应排空旧 Worker 后再依赖共享熔断与读取容量保证。
 
 每个租户内，依赖身份由 provider、清单 base URL（仅去掉尾部斜杠）、token 环境变量名和 username 环境变量名计算摘要。同一个账户配置和地址下的多个资源共享故障状态，不同租户互不影响。不同 URL 大小写、路径前缀或凭证变量名可能产生不同身份，运维应统一清单写法；密钥值轮换不改变身份。数据库不保存 URL 或凭证值，只保存摘要、provider、状态及恢复时间。
 
@@ -20,7 +20,21 @@
 
 租户/依赖行锁串行化状态更新。generation 和探测 token 防止旧请求关闭新的熔断；每次重试前再次检查许可，其他 Worker 打开熔断后，本地排队的重试会停止。已经在途的 GET 不能被数据库状态取消，超时许可也不保证远端请求立即结束。冷却和租约依赖节点时钟同步。
 
-正常关闭状态下，成功完成会清零失败计数；并发时“连续”按完成提交顺序定义，不是滑动窗口错误率。共享熔断不是并发限流器，当前没有依赖级 bulkhead、连接池复用或全局供应商配额协调；已有 Worker/租户并发上限仍是调度边界。
+正常关闭状态下，成功完成会清零失败计数；并发时“连续”按完成提交顺序定义，不是滑动窗口错误率。共享熔断之外，新增按相同租户/依赖键分配的共享读取名额；已有 Worker/租户并发上限仍是外层调度边界。当前没有连接池复用、跨租户供应商总配额协调或 FIFO 公平排队。
+
+## 共享读取名额（bulkhead）
+
+每个依赖的默认并发名额为 4，由 `AGENT_MAX_READS_PER_DEPENDENCY` 初始化。初次获得许可时写入数据库，之后 Worker 的本地配置变化不会覆盖共享上限；运维通过 `dependency-limit TENANT DEPENDENCY_HASH LIMIT` 调整，范围 1—128。
+
+获取名额与熔断检查在同一依赖行锁事务内执行。容量满返回 `DEPENDENCY_CAPACITY`，不发送 HTTP、不短暂睡眠、不增加熔断失败计数，也不抢占半开探测。Worker 将任务置为相应等待原因，后续 tick 再竞争；目前不保证 FIFO 或防饥饿。
+
+一个逻辑读取（含最多三次尝试及短退避）占一个 90 秒租约。请求返回、永久失败、取消或异常都会通过 finally 释放自身租约；进程崩溃后，下次申请会回收该依赖的过期租约。重复完成和过期持有者不能改变熔断状态，旧 token 不能释放替代请求的名额。请求前后都验证租约，过期响应以 `DEPENDENCY_LEASE_LOST` 拒绝继续发布。
+
+降低上限不取消在途请求，活动数量可以暂时高于新限额，此时不再接纳新请求。reset 只重置熔断代际，不删除仍有效的读取名额；旧请求完成或到期后才腾出容量。不要通过删行来释放容量。
+
+该上限约束的是**有效租约数**，不是远端物理连接的硬上限。超时、进程暂停和时钟偏差可能导致租约过期时原 GET 仍在途；回收后可能短暂重叠。读取为可重复 GET，迟到结果会被拒绝；该协议不用于写入 fencing。90 秒不自动续租，依赖节点时钟同步和已有 HTTP 超时。
+
+新表采用 FORCE RLS 和到 dependency_circuits 的租户复合外键，并有租户/依赖/到期时间联合索引。迁移默认 max_in_flight=0 表示尚未初始化，保留旧熔断状态。降级到 0009 会移除租约表及共享限额；必须先排空读取，记录手动限额，重新升级后恢复配置。表被删除再创建后，需要重新授予运行角色 DML 权限；已通过原生 PostgreSQL 回滚演练验证这一要求。
 
 ## 重试与授权
 
@@ -40,14 +54,18 @@ HTTP 客户端 connect 超时 5 秒，读取等 I/O 超时 10 秒，读取块之
 .venv/bin/agent-py dependency-status demo
 # 确认供应商恢复、配额或配置修复后，使用上一步返回的完整 dependency 摘要
 .venv/bin/agent-py dependency-reset demo DEPENDENCY_HASH
+# 调整共享容量，不驱逐在途请求
+.venv/bin/agent-py dependency-limit demo DEPENDENCY_HASH 4
 ```
 
-两者是持有应用数据库配置的本地运维入口，不开放给模型或普通 HTTP 用户。reset 清零失败并增加 generation，旧许可无法覆盖新状态；它会绕过剩余冷却时间，应先确认服务和限流窗口。当前没有单独的不可改写运维审计记录，需按现有主机访问控制管理命令权限。
+这些命令是持有应用数据库配置的本地运维入口，不开放给模型或普通 HTTP 用户。reset 清零失败并增加 generation，旧许可无法覆盖新状态；它会绕过剩余冷却时间，应先确认服务和限流窗口。当前没有单独的不可改写运维审计记录，需按现有主机访问控制管理命令权限。
 
-API 的 `agent_dependency_circuits{tenant,provider,state}` 从数据库导出计数，仅覆盖 `AGENT_MONITORING_TENANTS`；多副本按 max 聚合。Worker 的 `agent_enterprise_reads_total{provider,result}` 记录成功和瞬态失败尝试，不包含被许可或授权提前拒绝的请求，也不是所有 HTTP 请求的总数。它不使用 URL、凭证名、依赖摘要或任务 ID 作为标签。监控模板增加持续 OPEN 告警，真实告警送达仍待部署验收。
+API 的 `agent_dependency_circuits{tenant,provider,state}` 从数据库导出计数，仅覆盖 `AGENT_MONITORING_TENANTS`；多副本按 max 聚合。Worker 的 `agent_enterprise_reads_total{provider,result}` 记录成功、瞬态失败尝试及 result="capacity" 的容量拒绝；其余被许可或授权提前拒绝的请求不包含在内，也不是所有 HTTP 请求的总数。它不使用 URL、凭证名、依赖摘要或任务 ID 作为标签。`agent_dependency_read_slots{tenant,provider,state}` 汇总活动名额与上限，多副本按 max 聚合；不同依赖的同 provider 总数不能代替单个依赖饱和判断，详细活动数/限额见 dependency-status。监控模板增加持续 OPEN 和容量拒绝告警及 Grafana 名额面板，真实告警送达仍待部署验收。
 
 新表暂未自动清理，清单身份长期变更会留下旧状态；需后续实现带运行中请求检查的保留策略。禁止直接删除活跃熔断行来恢复，它会丢失 generation 历史；使用 reset 命令。
 
 ## 验证边界
 
 默认测试覆盖三次失败打开、服务实例重建、跨租户隔离、并发半开单探测、旧回执和过期探测失效、重试预算、取消复核、其他 Worker 打开后停止重试、429 共享等待、永久失败、字段错误、指标范围和人工恢复。原生 PostgreSQL 验证新表 RLS、真实多连接竞争及完整迁移。网络故障使用 HTTP Mock，并未注入真实企业链路故障或证明生产容量/SLO；付费模型仍没有额外重试。
+
+共享容量测试补充了跨服务实例/多连接争抢、源与租户隔离、默认值仅初始化一次、调低上限、重置不超配、异常释放、持有名额重试、过期结果拒绝、迟到完成不影响新持有者及 CLI/监控范围。未进行真实供应商压测或远端并发硬上限验收。

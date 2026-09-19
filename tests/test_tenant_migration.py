@@ -108,3 +108,34 @@ def test_mid_migration_failure_rolls_back_sqlite_table_rebuilds(legacy, monkeypa
     assert_legacy(db)
     command.upgrade(cfg, "head")
     command.check(cfg)
+
+
+def test_existing_circuit_preserved_and_bulkhead_limit_initialized_after_upgrade(legacy):
+    from agent_py.db import DependencyCircuit
+    from agent_py.resilience import acquire, complete, dependency_status, set_read_limit
+
+    cfg, db, _ = legacy
+    command.upgrade(cfg, "0009_tenant_references")
+    with db.engine.begin() as c:
+        c.execute(
+            text(
+                "INSERT INTO dependency_circuits (id, tenant_id, created_at, dependency, provider, revision, generation, failures, state) VALUES (:id, 't1', CURRENT_TIMESTAMP, 'existing', 'jenkins_build', 3, 7, 2, 'CLOSED')"
+            ),
+            {"id": uid()},
+        )
+    command.upgrade(cfg, "head")
+    with db.session("t1") as s:
+        row = s.query(DependencyCircuit).one()
+        assert (row.generation, row.failures, row.max_in_flight) == (7, 2, 0)
+    service = Service(db, Settings(max_reads_per_dependency=3, _env_file=None), None)
+    permit = acquire(service, "t1", "existing", "jenkins_build")
+    assert dependency_status(service, "t1")[0]["read_limit"] == 3
+    set_read_limit(service, "t1", "existing", 2)
+    complete(service, permit, None)
+    command.downgrade(cfg, "0009_tenant_references")
+    assert "dependency_read_leases" not in inspect(db.engine).get_table_names()
+    command.upgrade(cfg, "head")
+    command.check(cfg)
+    with db.session("t1") as s:
+        row = s.query(DependencyCircuit).one()
+        assert (row.generation, row.failures, row.max_in_flight) == (7, 2, 0)

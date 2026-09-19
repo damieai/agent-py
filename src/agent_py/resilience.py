@@ -5,9 +5,9 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, func, select, update
 
-from agent_py.db import DependencyCircuit, now, uid
+from agent_py.db import DependencyCircuit, DependencyReadLease, now, uid
 from agent_py.domain import DomainError, digest
 
 
@@ -71,23 +71,68 @@ class Permit:
     provider: str
     generation: int
     probe_token: str | None
+    lease_id: str
 
 
 def acquire(service, tenant, key, provider):
     with service.db.session(tenant) as s:
         row = lock_circuit(s, tenant, key, provider)
+        when = now()
+        if row.state != "CLOSED" and row.retry_at and aware(row.retry_at) > when:
+            raise DomainError("DEPENDENCY_OPEN", "Enterprise dependency is cooling down", 503)
+        if row.max_in_flight == 0:
+            row.max_in_flight = service.settings.max_reads_per_dependency
+        s.execute(
+            delete(DependencyReadLease).where(
+                DependencyReadLease.tenant_id == tenant,
+                DependencyReadLease.dependency == key,
+                DependencyReadLease.expires_at <= when,
+            )
+        )
+        active = s.scalar(
+            select(func.count())
+            .select_from(DependencyReadLease)
+            .where(
+                DependencyReadLease.tenant_id == tenant,
+                DependencyReadLease.dependency == key,
+                DependencyReadLease.expires_at > when,
+            )
+        )
+        if active >= row.max_in_flight:
+            service.telemetry.reads.labels(provider, "capacity").inc()
+            raise DomainError(
+                "DEPENDENCY_CAPACITY", "Enterprise dependency read capacity is full", 503
+            )
         if row.state != "CLOSED":
-            if row.retry_at and aware(row.retry_at) > now():
-                raise DomainError("DEPENDENCY_OPEN", "Enterprise dependency is cooling down", 503)
             row.state, row.probe_token = "HALF_OPEN", uid()
             row.generation += 1
-            row.retry_at = now() + timedelta(seconds=90)
-        return Permit(tenant, key, provider, row.generation, row.probe_token)
+            row.retry_at = when + timedelta(seconds=90)
+        lease_id = uid()
+        s.add(
+            DependencyReadLease(
+                id=lease_id,
+                tenant_id=tenant,
+                dependency=key,
+                expires_at=when + timedelta(seconds=90),
+            )
+        )
+        return Permit(tenant, key, provider, row.generation, row.probe_token, lease_id)
 
 
 def complete(service, permit, outcome, retry_after=None):
     with service.db.session(permit.tenant) as s:
         row = lock_circuit(s, permit.tenant, permit.dependency, permit.provider)
+        expiry = s.scalar(
+            delete(DependencyReadLease)
+            .where(
+                DependencyReadLease.id == permit.lease_id,
+                DependencyReadLease.tenant_id == permit.tenant,
+                DependencyReadLease.dependency == permit.dependency,
+            )
+            .returning(DependencyReadLease.expires_at)
+        )
+        if expiry is None or aware(expiry) <= now():
+            return  # Duplicate or expired owners must not alter breaker state.
         if row.generation != permit.generation or row.probe_token != permit.probe_token:
             return
         probe = row.state == "HALF_OPEN"
@@ -111,6 +156,17 @@ def complete(service, permit, outcome, retry_after=None):
 
 def validate_permit(service, permit):
     with service.db.session(permit.tenant) as s:
+        if not s.scalar(
+            select(DependencyReadLease.id).where(
+                DependencyReadLease.id == permit.lease_id,
+                DependencyReadLease.tenant_id == permit.tenant,
+                DependencyReadLease.dependency == permit.dependency,
+                DependencyReadLease.expires_at > now(),
+            )
+        ):
+            raise DomainError(
+                "DEPENDENCY_LEASE_LOST", "Enterprise read lease expired or was released", 503
+            )
         row = s.scalar(
             select(DependencyCircuit).where(
                 DependencyCircuit.tenant_id == permit.tenant,
@@ -144,6 +200,53 @@ def reset_circuit(service, tenant, key):
         row.state, row.failures, row.retry_at, row.probe_token = "CLOSED", 0, None, None
 
 
+def set_read_limit(service, tenant, key, limit):
+    if type(limit) is not int or not 1 <= limit <= 128:
+        raise DomainError("INVALID_LIMIT", "Dependency read limit must be between 1 and 128", 422)
+    with service.db.session(tenant) as s:
+        existing = s.scalar(
+            select(DependencyCircuit).where(
+                DependencyCircuit.tenant_id == tenant,
+                DependencyCircuit.dependency == key,
+            )
+        )
+        if not existing:
+            raise DomainError("NOT_FOUND", "Dependency circuit not found", 404)
+        lock_circuit(s, tenant, key, existing.provider).max_in_flight = limit
+
+
+def dependency_status(service, tenant):
+    with service.db.session(tenant) as s:
+        active = dict(
+            s.execute(
+                select(DependencyReadLease.dependency, func.count())
+                .where(
+                    DependencyReadLease.tenant_id == tenant,
+                    DependencyReadLease.expires_at > now(),
+                )
+                .group_by(DependencyReadLease.dependency)
+            ).all()
+        )
+        rows = s.scalars(
+            select(DependencyCircuit)
+            .where(DependencyCircuit.tenant_id == tenant)
+            .order_by(DependencyCircuit.provider, DependencyCircuit.dependency)
+        ).all()
+        return [
+            dict(
+                dependency=row.dependency,
+                provider=row.provider,
+                state=row.state,
+                failures=row.failures,
+                generation=row.generation,
+                retry_at=row.retry_at.isoformat() if row.retry_at else None,
+                active_reads=active.get(row.dependency, 0),
+                read_limit=row.max_in_flight or service.settings.max_reads_per_dependency,
+            )
+            for row in rows
+        ]
+
+
 def read_with_policy(
     service,
     principal,
@@ -171,6 +274,7 @@ def read_with_policy(
                 raise TransientReadError("UPSTREAM_RETRY_BUDGET")
             try:
                 result = read()
+                validate_permit(service, permit)
                 authorize()
                 outcome = "success"
                 service.telemetry.reads.labels(source.provider, "success").inc()

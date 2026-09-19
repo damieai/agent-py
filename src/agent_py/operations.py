@@ -174,7 +174,16 @@ def prometheus_snapshot(service):
         ["tenant", "provider", "state"],
         registry=registry,
     )
+    read_slots = Gauge(
+        "agent_dependency_read_slots",
+        "Shared enterprise read slots summed by provider",
+        ["tenant", "provider", "state"],
+        registry=registry,
+    )
     for tenant in dict.fromkeys(service.settings.monitoring_tenants):
+        from agent_py.resilience import dependency_status
+
+        dependencies = dependency_status(service, tenant)
         with service.db.session(tenant) as s:
             counts = {
                 (provider, state): count
@@ -185,6 +194,12 @@ def prometheus_snapshot(service):
                 )
             }
         for provider in ("bitbucket_pr", "jira_issue", "jenkins_build", "kubernetes_deployment"):
+            read_slots.labels(tenant, provider, "active").set(
+                sum(row["active_reads"] for row in dependencies if row["provider"] == provider)
+            )
+            read_slots.labels(tenant, provider, "limit").set(
+                sum(row["read_limit"] for row in dependencies if row["provider"] == provider)
+            )
             for state in ("CLOSED", "OPEN", "HALF_OPEN"):
                 circuits.labels(tenant, provider, state).set(counts.get((provider, state), 0))
         data = summary(service, tenant)

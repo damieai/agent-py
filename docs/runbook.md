@@ -66,3 +66,7 @@
 ## 评测门禁失败处置
 
 运行 `make evaluation-gate` 或对已有报告使用 `agent-py evaluation-gate`；命令与格式见[评测门禁说明](evaluation-gates.md)。退出 1 时查看 gate.json 中失败的 checks 和 paired_queries，定位具体协议案例或检索退化；退出 2 时先修复缺失/无效证据、数据集摘要或覆盖范围。不要删除失败案例或临时降低阈值使门禁通过。输入策略和报告版本变更需独立审阅，当前门禁不直接授权发布。
+
+## 企业读取容量等待
+
+`DEPENDENCY_CAPACITY` 表示共享名额已满，先用 `dependency-status TENANT` 查看 active_reads/read_limit，再检查供应商延迟与挂起 Worker。按供应商配额评估后可用 `dependency-limit TENANT HASH LIMIT` 修改共享限额；调低不会驱逐在途读取。不要通过 reset 或删除租约绕开限流。`DEPENDENCY_LEASE_LOST` 表示超过 90 秒或已释放，返回内容不可继续发布。升级 0010 后需授予运行角色新租约表的 DML 权限，回滚再升级时重新授予；详见[依赖故障治理](dependency-resilience.md)。

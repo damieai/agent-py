@@ -97,6 +97,13 @@ def test_postgres_migrations_rls_and_concurrent_budget(tmp_path, monkeypatch):
             c.execute(text("DELETE FROM outbox WHERE id=:id"), {"id": bad_id})
         command.upgrade(Config("alembic.ini"), "head")
         command.check(Config("alembic.ini"))
+        # A downgrade drops the new lease table; re-created tables need DML grants again.
+        with engine.begin() as c:
+            c.execute(
+                text(
+                    "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO agent_test_app"
+                )
+            )
         # Even the migration administrator cannot commit an invalid reference.
         with pytest.raises(IntegrityError):
             with engine.begin() as c:
@@ -226,6 +233,44 @@ def test_postgres_migrations_rls_and_concurrent_budget(tmp_path, monkeypatch):
             probes = [p for p in pool.map(probe, range(4)) if p]
         assert len(probes) == 1 and probes[0].probe_token
         complete_read(service, probes[0], "success")
+        # Real pooled connections must share a single healthy-dependency capacity.
+        from agent_py.db import DependencyReadLease, now
+        from agent_py.resilience import dependency_status, set_read_limit
+
+        initial = acquire_read(service, "one", "bulkhead", "jenkins_build")
+        complete_read(service, initial, "success")
+        set_read_limit(service, "one", "bulkhead", 2)
+
+        def read_slot(_):
+            try:
+                return acquire_read(service, "one", "bulkhead", "jenkins_build")
+            except DomainError as exc:
+                assert exc.code == "DEPENDENCY_CAPACITY"
+                return None
+
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            slots = [permit for permit in pool.map(read_slot, range(4)) if permit]
+        assert len(slots) == 2
+        assert acquire_read(service, "two", "foreign-only", "jenkins_build")
+        with appdb.session("one") as s:
+            assert s.execute(
+                text("SELECT DISTINCT tenant_id FROM dependency_read_leases")
+            ).scalars().all() == ["one"]
+        with appdb.engine.connect() as c:
+            assert c.scalar(text("SELECT count(*) FROM dependency_read_leases")) == 0
+        with pytest.raises(IntegrityError):
+            with engine.begin() as c:
+                c.execute(
+                    DependencyReadLease.__table__.insert().values(
+                        tenant_id="one", dependency="foreign-only", expires_at=now()
+                    )
+                )
+        complete_read(service, slots[0], "success")
+        assert acquire_read(service, "one", "bulkhead", "jenkins_build")
+        status = next(
+            row for row in dependency_status(service, "one") if row["dependency"] == "bulkhead"
+        )
+        assert status["active_reads"] == status["read_limit"] == 2
     finally:
         get_settings.cache_clear()
         if appdb:

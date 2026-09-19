@@ -5,7 +5,7 @@
 | 检查 | 命令 | 结果 |
 |---|---|---|
 | 静态检查及格式 | `make check` | 通过，包含迁移文件 |
-| 默认测试 | `.venv/bin/pytest -q` | 273 通过；4 个基础设施测试默认跳过 |
+| 默认测试 | `.venv/bin/pytest -q` | 292 通过；4 个基础设施测试默认跳过 |
 | PostgreSQL | `AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q` | 1 通过：迁移、非特权角色 RLS、并发预算、共享准入、运维聚合、分块检索、并发审计快照、共享熔断及复合外键迁移回滚 |
 | Temporal | `AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_runtime.py -q` | 2 通过：Outbox 与本地服务工作流 |
 | Temporal 候选修复 | `AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_repair_workflow.py -m integration -q` | 1 通过：冻结输入到人工审阅，再取消；模型/容器为测试适配器 |
@@ -46,3 +46,7 @@
 评测门禁里程碑新增 35 项默认测试：确定性配对、完整案例/查询覆盖、数据集与预算绑定、重复身份、伪造汇总/相关性指标、非有限数与布尔计数、旧报告拒绝、仿真副作用及重复派发硬失败、平均分相同但个别查询退化、离线 CLI 三种退出码、输入缺失替换旧 PASS、严格 JSON/大小限制与输出防覆盖。全量套件 273 通过、4 跳过（23.05 秒），静态检查通过。隔离脚本实际执行 60 条 development 仿真及 12 条检索查询，门禁 PASS；lexical / bm25_rrf 的 recall 与 MRR 为 0.833 / 1.000，平均上下文字节约 417 / 884，退化查询 0。CLI 对相同证据再次判定 PASS。
 
 本轮无数据库迁移和前端变更，未重复 PostgreSQL、Temporal 或前端构建；Bitbucket CI 配置已加入门禁及报告保留，但未运行远端流水线。本地结果不证明模型质量、统计显著性、代码来源或生产可发布性，完整 AgentRelease、真实成本/时延门禁与灰度仍待实现。
+
+企业读取共享容量里程碑新增 19 项默认测试，全量套件 292 通过、4 跳过（23.67 秒），覆盖跨服务实例竞争、租户/来源隔离、重试持有同一名额、容量拒绝不发请求、异常/撤权释放、崩溃到期回收、迟到回执不能释放替代名额、重复完成不重复计数、调低容量不驱逐、配置仅首次初始化、重置不超配、CLI 修改与指标范围，以及旧熔断状态升级保留和容量迁移回滚再升级。真实 PostgreSQL 完整迁移、非特权角色 RLS、跨租户外键和四连接竞争通过（1 项，1.82 秒）。回滚重建新表后重新授予运行角色 DML 权限，部署文档已同步。
+
+本地 SQLite 在备份后升级至 `0010_dependency_bulkhead`，Alembic schema 检查无差异；监控 YAML/JSON 可解析，静态检查通过。本轮没有更改前端及 Temporal Workflow，未重跑浏览器构建或 Temporal 服务集成。真实供应商压测、告警送达、连接池复用和跨租户供应商总配额仍未验收；有效租约数上限不等于远端连接的硬上限。
