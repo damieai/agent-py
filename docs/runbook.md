@@ -58,3 +58,7 @@
 ## 企业证据采集依赖
 
 升级 `0008_dependency_circuits` 后，用 `agent-py dependency-status TENANT` 查看共享熔断。`DEPENDENCY_OPEN` 表示冷却或探测期间等待；先检查供应商健康及 Retry-After，再决定是否执行 `dependency-reset TENANT HASH`。不要删除状态行，避免丢失旧许可隔离信息。完整策略和监控见[依赖故障治理](dependency-resilience.md)。
+
+## 审计签名运维
+
+签名默认关闭，启用、离线验证及轮换流程见[审计签名说明](audit-signing.md)。`AUDIT_SIGNING_UNAVAILABLE` 时检查 manifest 范围、密钥有效期及私钥权限；不要以无签名包冒充签名成功。`AUDIT_SIGNATURE_INVALID` 时检查独立信任清单、预期租户/用途、撤销状态和时钟；不要从待验证包导入可信公钥以绕过失败。私钥疑似泄露时撤销旧 ID 并通过独立渠道更新验证者策略。

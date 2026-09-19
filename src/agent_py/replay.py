@@ -1,4 +1,5 @@
 import json
+from copy import deepcopy
 
 from sqlalchemy import select
 
@@ -46,6 +47,13 @@ class ReplayExecutor:
     def __init__(self, recording: dict):
         from agent_py.audit import check_recording
 
+        if recording.get("schema") == "signed-recording-v1":
+            raise DomainError(
+                "REPLAY_SIGNATURE_REQUIRED",
+                "Verify signed recording with an independent trust store first",
+                422,
+            )
+
         self.audit = None
         self.position = 0
         if recording.get("body", {}).get("schema") == "recording-v2":
@@ -91,3 +99,11 @@ class ReplayExecutor:
             )
         if self.position != len(self.audit["dispatch_order"]):
             raise DomainError("REPLAY_INCOMPLETE", "Recorded dispatches remain unconsumed")
+
+    @classmethod
+    def from_signed(cls, envelope, trust_store, tenant, audience):
+        from agent_py.audit_signing import verify_recording
+
+        envelope = deepcopy(envelope)
+        verify_recording(envelope, trust_store, tenant, audience)
+        return cls(envelope["recording"])

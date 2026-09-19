@@ -5,7 +5,7 @@
 | 检查 | 命令 | 结果 |
 |---|---|---|
 | 静态检查及格式 | `make check` | 通过，包含迁移文件 |
-| 默认测试 | `.venv/bin/pytest -q` | 179 通过；4 个基础设施测试默认跳过 |
+| 默认测试 | `.venv/bin/pytest -q` | 206 通过；4 个基础设施测试默认跳过 |
 | PostgreSQL | `AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q` | 1 通过：迁移、非特权角色 RLS、并发预算、共享准入、运维聚合、分块检索、并发审计快照及共享熔断 |
 | Temporal | `AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_runtime.py -q` | 2 通过：Outbox 与本地服务工作流 |
 | Temporal 候选修复 | `AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_repair_workflow.py -m integration -q` | 1 通过：冻结输入到人工审阅，再取消；模型/容器为测试适配器 |
@@ -38,3 +38,5 @@
 尚未验证：真实付费模型、企业账号与外部写入、Docker 沙盒、Compose 容器组合、浏览器端到端、TLC 模型检查、负载/SLO、灾备恢复与 GPU 训练。当前运行环境没有可用的 Docker 引擎，代码执行器保持关闭，不降级到宿主机执行。
 
 完整范围及剩余工作见[实施清单](implementation-plan.md)。
+
+审计签名里程碑新增 27 项默认测试：篡改与重新计算包摘要、错误算法/密钥、租户及用途隔离、独立信任策略、轮换与撤销、历史窗口/未来时间、私钥权限与符号链接、禁止覆盖、签名声明与任务不一致、严格 JSON、离线 CLI 与防降级、API 权限及签名配置失败。默认套件 206 项通过，4 项跳过；没有数据库迁移，本轮未重跑 PostgreSQL/Temporal 服务集成。未配置生产签名密钥或验证 KMS/HSM、可信时间戳及不可改写存储。

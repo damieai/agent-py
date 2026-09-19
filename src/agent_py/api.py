@@ -181,6 +181,7 @@ def create_app(
             "status": "ok",
             "mode": settings.execution_mode,
             "repair_enabled": settings.allow_candidate_execution and settings.allow_model_api,
+            "audit_signing_configured": settings.audit_signing_manifest is not None,
         }
 
     @app.get("/health/ready")
@@ -286,10 +287,19 @@ def create_app(
         return {"repair": repair_details(service, p, task_id)}
 
     @app.get("/api/v1/tasks/{task_id}/recording")
-    def recording(task_id: str, p: Auth):
+    def recording(task_id: str, p: Auth, signed: bool = False):
         from agent_py.audit import export_audit
 
         data = export_audit(service, p, task_id)
+        if signed:
+            from agent_py.audit_signing import sign_recording
+
+            if settings.audit_signing_manifest is None:
+                raise DomainError(
+                    "AUDIT_SIGNING_UNAVAILABLE", "Audit signing is not configured", 503
+                )
+            data = sign_recording(data, settings.audit_signing_manifest)
+            service.get_task(p, task_id)
         return JSONResponse(
             data,
             headers={

@@ -186,10 +186,18 @@ def ops_status():
 
 
 @app.command()
-def export(task_id: str, output: Path):
+def export(task_id: str, output: Path, signed: bool = False):
     from agent_py.audit import export_audit
 
-    recording = export_audit(build_service(get_settings()), principal(), task_id)
+    service = build_service(get_settings())
+    recording = export_audit(service, principal(), task_id)
+    if signed:
+        from agent_py.audit_signing import sign_recording
+
+        if service.settings.audit_signing_manifest is None:
+            raise typer.BadParameter("Configure AGENT_AUDIT_SIGNING_MANIFEST for signed export")
+        recording = sign_recording(recording, service.settings.audit_signing_manifest)
+        service.get_task(principal(), task_id)
     output.write_text(json.dumps(recording, indent=2))
     typer.echo(
         "Exported tenant-scoped recording. Review business-sensitive content before sharing."
@@ -197,17 +205,49 @@ def export(task_id: str, output: Path):
 
 
 @app.command()
-def audit_check(recording: Path):
+def audit_keygen(
+    directory: Path, key_id: str, tenant: str, audience: str = "agent-audit", days: int = 90
+):
+    """Create owner-only signing files in a new directory; never overwrite existing keys."""
+    from agent_py.audit_signing import generate_key_files
+
+    try:
+        paths = generate_key_files(directory, key_id, tenant, audience, days)
+    except (OSError, ValueError) as exc:
+        raise typer.BadParameter(
+            "Cannot create key files; check scope, lifetime and use an empty directory"
+        ) from exc
+    typer.echo(json.dumps(paths, indent=2))
+
+
+@app.command()
+def audit_check(
+    recording: Path,
+    trust_store: Path | None = None,
+    tenant: str | None = None,
+    audience: str | None = None,
+):
     """Check a v2 audit package offline; no production service or credentials are loaded."""
-    from agent_py.audit import MAX_RECORDING_BYTES, check_recording
+    from agent_py.audit import check_recording
+    from agent_py.audit_signing import MAX_SIGNED_BYTES, decode_json, verify_recording
     from agent_py.domain import DomainError
 
     with recording.open("rb") as stream:
-        raw = stream.read(MAX_RECORDING_BYTES + 1)
-    if len(raw) > MAX_RECORDING_BYTES:
-        raise typer.BadParameter("Recording exceeds 10 MB")
+        raw = stream.read(MAX_SIGNED_BYTES + 1)
+    if len(raw) > MAX_SIGNED_BYTES:
+        raise typer.BadParameter("Recording exceeds signed-package limit")
     try:
-        report = check_recording(json.loads(raw))
+        package = decode_json(raw)
+        if isinstance(package, dict) and package.get("schema") == "signed-recording-v1":
+            if trust_store is None or not tenant or not audience:
+                raise typer.BadParameter(
+                    "Signed packages require --trust-store, --tenant and --audience"
+                )
+            report = verify_recording(package, trust_store, tenant, audience)
+        else:
+            if trust_store is not None or tenant is not None or audience is not None:
+                raise typer.BadParameter("Expected a signed package; refusing unsigned downgrade")
+            report = {**check_recording(package), "signature_verified": False}
     except DomainError as exc:
         typer.echo(f"{exc.code}: {exc.message}", err=True)
         raise typer.Exit(1) from exc
