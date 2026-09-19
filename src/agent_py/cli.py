@@ -268,6 +268,30 @@ def evaluate(split: str = "development", output: Path = Path(".runtime/evaluatio
 
 
 @app.command()
+def evaluation_gate(
+    policy: Path,
+    simulation: Path,
+    baseline: Path,
+    candidate: Path,
+    fixture: Path,
+    output: Path = Path(".runtime/evaluation-gate.json"),
+):
+    """Offline gate: exit 0 PASS, 1 FAIL, 2 INSUFFICIENT_EVIDENCE or invalid input paths."""
+    from agent_py.evaluation_gate import run_gate
+
+    try:
+        report = run_gate(policy, simulation, baseline, candidate, fixture, output)
+    except (OSError, ValueError, RecursionError):
+        typer.echo(
+            "Cannot write gate report; check local paths and input/output separation", err=True
+        )
+        raise typer.Exit(2) from None
+    status = report["body"]["status"]
+    typer.echo(f"Local evaluation gate: {status}; {output}; not production authorization")
+    raise typer.Exit({"PASS": 0, "FAIL": 1, "INSUFFICIENT_EVIDENCE": 2}[status])
+
+
+@app.command()
 def ingest(task_id: str, file: Path):
     """Import an explicitly selected text document as untrusted, task-project evidence."""
     from agent_py.db import Document, now

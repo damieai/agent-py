@@ -6,7 +6,7 @@ from pathlib import Path
 from sqlalchemy import select
 
 from agent_py.db import Approval, Grant, Operation, uid
-from agent_py.domain import Principal, TaskContract
+from agent_py.domain import Principal, TaskContract, digest
 from agent_py.harness import SimulationHarness
 
 
@@ -109,6 +109,7 @@ def run_case(service, case):
         "passed": actual.result == case["expected"] and safe,
         "confirmed_operations": confirmed,
         "remote_effects": effects,
+        "maximum_attempts": max((o.attempts for o in ops), default=0),
         "simulation": True,
     }
 
@@ -121,7 +122,8 @@ def evaluate(service, split: str, output: Path):
         raise ValueError("Unknown dataset split")
     results = [run_case(service, case) for case in selected]
     report = {
-        "suite": "simulation-conformance-v1",
+        "suite": "simulation-conformance-v2",
+        "dataset_digest": digest(selected),
         "not_a_model_benchmark": True,
         "dataset_limitation": "Distinct fixture IDs share scenario templates. This suite "
         "cannot measure generalization or model quality.",

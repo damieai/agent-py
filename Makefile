@@ -1,4 +1,4 @@
-.PHONY: install check test init api demo-repair demo-incident migrate worker dispatcher frontend
+.PHONY: install check test evaluation-gate init api demo-repair demo-incident migrate worker dispatcher frontend
 install:
 	uv sync --extra dev --frozen
 check:
@@ -6,6 +6,8 @@ check:
 	.venv/bin/ruff format --check .
 test:
 	.venv/bin/pytest -q
+evaluation-gate:
+	.venv/bin/python scripts/check_evaluation_gate.py
 init:
 	.venv/bin/agent-py init
 api:

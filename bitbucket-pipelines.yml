@@ -12,8 +12,10 @@ pipelines:
           - AGENT_DATABASE_URL=sqlite:///.runtime/ci-migrations.db .venv/bin/alembic upgrade head
           - AGENT_DATABASE_URL=sqlite:///.runtime/ci-migrations.db .venv/bin/alembic check
           - .venv/bin/pytest -q --junitxml=.runtime/tests.xml
+          - .venv/bin/python scripts/check_evaluation_gate.py
         artifacts:
           - .runtime/tests.xml
+          - .runtime/gate/*.json
     - step:
         name: Workbench build
         image: node:24-slim

@@ -62,3 +62,7 @@
 ## 审计签名运维
 
 签名默认关闭，启用、离线验证及轮换流程见[审计签名说明](audit-signing.md)。`AUDIT_SIGNING_UNAVAILABLE` 时检查 manifest 范围、密钥有效期及私钥权限；不要以无签名包冒充签名成功。`AUDIT_SIGNATURE_INVALID` 时检查独立信任清单、预期租户/用途、撤销状态和时钟；不要从待验证包导入可信公钥以绕过失败。私钥疑似泄露时撤销旧 ID 并通过独立渠道更新验证者策略。
+
+## 评测门禁失败处置
+
+运行 `make evaluation-gate` 或对已有报告使用 `agent-py evaluation-gate`；命令与格式见[评测门禁说明](evaluation-gates.md)。退出 1 时查看 gate.json 中失败的 checks 和 paired_queries，定位具体协议案例或检索退化；退出 2 时先修复缺失/无效证据、数据集摘要或覆盖范围。不要删除失败案例或临时降低阈值使门禁通过。输入策略和报告版本变更需独立审阅，当前门禁不直接授权发布。

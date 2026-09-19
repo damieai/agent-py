@@ -1,0 +1,15 @@
+{
+  "schema": "evaluation-gate-policy-v1",
+  "simulation_split": "development",
+  "simulation_dataset_digest": "cc799d5bf3930609cf51649a6363e9b5cfd9d0bfb806e357c8bdbdc9ff210725",
+  "retrieval_dataset_digest": "5282c095dfc6cc250d94232cfe4c1e931af25e66d61e930b7fa719f8776dcc33",
+  "baseline_strategy": "lexical",
+  "candidate_strategy": "bm25_rrf",
+  "minimum_queries": 12,
+  "minimum_recall": 0.9,
+  "minimum_mrr": 0.9,
+  "maximum_mean_recall_drop": 0.0,
+  "maximum_mean_mrr_drop": 0.0,
+  "maximum_regressed_queries": 0,
+  "maximum_mean_context_bytes": 6000
+}
