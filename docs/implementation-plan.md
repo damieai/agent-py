@@ -29,7 +29,8 @@
 | POST /tasks/{id}/cancel、/takeover | 停止后续派发，保留对账 |
 | POST /approvals/{id}/decisions | 摘要绑定、期限与审批角色检查 |
 | GET /operations/{id} | 动作确认及恢复状态 |
-| GET /tasks/{id}/events | 带序号 SSE，续传与持续授权复核 |
+| GET /tasks/{id}/events | 带序号 SSE，续传、JWT/Grant 复核、历史缺口及终止信号 |
+| GET /tasks/{id}/recording | v2 一致性审计快照下载，当前授权及修复角色复核 |
 | GET /artifacts/{id} | 重新鉴权、摘要校验和安全下载 |
 | POST /tasks/{id}/context/preview | 当前用户范围内只读证据预览、行号与预算 |
 | POST /webhooks/connector | 签名、时间窗、Inbox 去重；通知仅触发查询 |
@@ -138,13 +139,16 @@
 - [x] React 任务列表、动作、参数审批、取消、接管和产物下载。
 - [x] 页面凭证仅保存在内存，产物重新鉴权；TypeScript 与生产构建检查。
 - [x] 当前授权证据预览、来源/版本/行号与片段正文、预算遗漏展示；前端构建验证。
-- [ ] 浏览器 E2E、实时 SSE 展示、中途修订及可恢复人工操作。
+- [x] 实时 SSE 工作台、游标续传、撤权清空与终止信号，7 项 Node 流解析测试；审计包下载。
+- [ ] 浏览器 E2E、中途修订及可恢复人工操作。
 
 验收：不读后台日志也能辨认批准对象、实际副作用与未决结果。
 
 ### B09 回放与故障工程 — 部分 verified
 
 - [x] 录制包摘要、严格调用匹配、分歧失败，无生产补齐。
+- [x] v2 数据库一致性快照、离线内部一致性校验、租户绑定及派发顺序回放；PostgreSQL 并发快照验证。
+- [ ] 签名/不可改写审计、完整模型/工具轨迹录制与端到端确定性回放。
 - [x] 故障与并发测试、Hypothesis 任意重试序列。
 - [x] 有限 TLA+ 正/负配置，明确假设与未覆盖范围。
 - [ ] TLC 实测、双 Worker/fencing 模型、反例到实现的完整映射。

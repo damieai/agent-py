@@ -13,7 +13,7 @@ from sqlalchemy import select, text
 from agent_py.adapters.simulation import DisabledLiveExecutor, SimulatedSystem
 from agent_py.artifacts import ArtifactStore
 from agent_py.config import Settings, get_settings
-from agent_py.db import Approval, Artifact, Database, Operation, Task, TaskEvent, tenant_get
+from agent_py.db import Approval, Artifact, Database, Operation, Task, tenant_get
 from agent_py.domain import ActionProposal, ApprovalDecision, DomainError, Principal, TaskContract
 from agent_py.security import authenticate, authorize
 from agent_py.service import Service
@@ -285,6 +285,20 @@ def create_app(
 
         return {"repair": repair_details(service, p, task_id)}
 
+    @app.get("/api/v1/tasks/{task_id}/recording")
+    def recording(task_id: str, p: Auth):
+        from agent_py.audit import export_audit
+
+        data = export_audit(service, p, task_id)
+        return JSONResponse(
+            data,
+            headers={
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+                "Content-Disposition": 'attachment; filename="task-recording.json"',
+            },
+        )
+
     @app.post("/api/v1/tasks/{task_id}/repair/retry-verification", status_code=202)
     def retry_verification(task_id: str, body: VerificationRetryRequest, p: Auth):
         from agent_py.repair import RepairHarness
@@ -325,7 +339,6 @@ def create_app(
         after: int = 0,
         last_event_id: Annotated[str | None, Header()] = None,
     ):
-        service.get_task(p, task_id)
         try:
             cursor = int(last_event_id) if last_event_id is not None else after
             if cursor < 0:
@@ -333,34 +346,39 @@ def create_app(
         except ValueError:
             raise DomainError("INVALID_CURSOR", "Event cursor must be a nonnegative integer", 422)
 
+        from agent_py.event_feed import event_page
+
+        token = request.headers["authorization"][7:]
+        first = await asyncio.to_thread(event_page, service, token, task_id, cursor)
+
         async def stream():
             nonlocal cursor
-            for _ in range(120):
+            for iteration in range(120):
                 if await request.is_disconnected():
                     break
                 try:
-                    t = service.get_task(p, task_id)  # Recheck grants during a long-lived stream.
-                except DomainError:
-                    yield "event: access_revoked\ndata: {}\n\n"
+                    rows, terminal = (
+                        first
+                        if iteration == 0
+                        else await asyncio.to_thread(event_page, service, token, task_id, cursor)
+                    )
+                except DomainError as exc:
+                    kind = (
+                        "history_unavailable"
+                        if exc.code in {"EVENT_GAP", "CURSOR_AHEAD"}
+                        else "access_revoked"
+                    )
+                    yield f"event: {kind}\ndata: {{}}\n\n"
                     break
-                with db.session(p.tenant_id) as s:
-                    rows = s.scalars(
-                        select(TaskEvent)
-                        .where(
-                            TaskEvent.tenant_id == p.tenant_id,
-                            TaskEvent.task_id == task_id,
-                            TaskEvent.sequence > cursor,
-                        )
-                        .order_by(TaskEvent.sequence)
-                        .limit(200)
-                    ).all()
                 for row in rows:
-                    cursor = row.sequence
-                    yield f"id: {cursor}\nevent: {row.event_type}\ndata: {json.dumps(row.payload)}\n\n"
-                if t.status == "TERMINATED" and len(rows) < 200:
+                    cursor = row["sequence"]
+                    yield f"id: {cursor}\nevent: {row['type']}\ndata: {json.dumps(row['payload'])}\n\n"
+                if terminal:
+                    yield 'event: stream.closed\ndata: {"terminal":true}\n\n'
                     break
                 yield ": heartbeat\n\n"
-                await asyncio.sleep(1)
+                if len(rows) < 200:
+                    await asyncio.sleep(1)
 
         return StreamingResponse(
             stream(),

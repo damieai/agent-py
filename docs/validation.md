@@ -5,11 +5,12 @@
 | 检查 | 命令 | 结果 |
 |---|---|---|
 | 静态检查及格式 | `make check` | 通过，包含迁移文件 |
-| 默认测试 | `.venv/bin/pytest -q` | 140 通过；4 个基础设施测试默认跳过 |
-| PostgreSQL | `AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q` | 1 通过：迁移、非特权角色 RLS、并发预算、共享准入、运维聚合及分块检索 |
+| 默认测试 | `.venv/bin/pytest -q` | 159 通过；4 个基础设施测试默认跳过 |
+| PostgreSQL | `AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q` | 1 通过：迁移、非特权角色 RLS、并发预算、共享准入、运维聚合、分块检索及并发审计快照 |
 | Temporal | `AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_runtime.py -q` | 2 通过：Outbox 与本地服务工作流 |
 | Temporal 候选修复 | `AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_repair_workflow.py -m integration -q` | 1 通过：冻结输入到人工审阅，再取消；模型/容器为测试适配器 |
 | 前端 | `npm --prefix web run build` | TypeScript 检查与 Vite 构建通过 |
+| 前端事件流 | `npm --prefix web test` | 7 项 Node 流解析测试通过；不是浏览器 E2E |
 | 开发集执行协议 | `agent-py evaluate --split development --output .runtime/evaluation.json` | 60/60；重复场景模板，不是模型质量评测 |
 
 默认测试包括响应丢失后对账、重复派发、取消、审批过期及撤销、跨租户访问、并发审批、重复预算结算、未知回执、严格回放与文件路径边界。确认成功的动作不接受迟到失败覆盖；缺少确认标记的回执保留为 UNKNOWN。
@@ -27,6 +28,8 @@
 共享调度和运行观测新增 17 项默认测试，覆盖跨 Worker 并发上限、FIFO、重复创建满队列竞态、取消后保留租约、过期 token 防护及迟到错误隔离、共享策略、运维 ACL、独立监控认证、指标标签边界、事件/trace 关联、私密文件轮转、Worker HTTP 抓取、Dispatcher 阶段隔离和超过 100 条 UNKNOWN 的轮转。完整默认套件 121 通过（9.24 秒）。原生 PostgreSQL 验证新表 RLS、跨租户并发准入和聚合查询（1 项，1.50 秒）；两条真实 Temporal 集成流程再次通过（76.94 秒）。SQLite 升级至 `0007_worker_admission`，schema 检查无差异。前端构建通过。Prometheus/Grafana 配置仅提供模板，尚未做服务联调或告警送达验收。
 
 证据检索里程碑新增 19 项默认用例，覆盖 Python 装饰器/CRLF 行号、无执行解析、非法 Python 回退、超长片段预算、私有及跨租户证据不影响排名、中文/标识符/来源匹配、罕见词排名、原文变化使片段失效、伪造片段拒绝、语料容量限制、预览 API 鉴权、离线评测重现、两种策略下推理恢复与修复快照兼容、调用前撤权和切换策略不重复付费。原生 PostgreSQL 新增 RLS 下流式读取与 AST 片段校验（1 项，1.53 秒）；真实 Temporal 的新版上下文候选修复—审阅—取消通过（1 项，22.73 秒），模型和容器仍使用测试适配器。TypeScript/Vite 构建通过。离线 12 个手写开发查询中，无检索/lexical/bm25_rrf 的 recall 与 MRR 分别为 0/0.833/1.000，不代表真实答案质量或泛化；命令、数据与限制见[检索说明](retrieval.md)。本轮没有数据表变更。
+
+事件时间线与审计里程碑新增 19 项默认用例。覆盖 v2 导出与严格回放、租户/顺序/重复/未消费完检查、整数和布尔参数区分、摘要及重新计算摘要后的内部矛盾、审批/回执/次数/终止清单、UNKNOWN 不伪造成功、取消和拒绝历史、下载权限、SSE 续传/终止/超前游标/历史缺口、流中撤权、JWT 过期、离线 CLI 和畸形 JSON 内容。默认套件 159 项通过（13.23 秒）。真实 PostgreSQL 并发取消验证 REPEATABLE READ 快照仍读取原事件视图，结束后导出新版本，RLS 保持有效（1 项，1.72 秒）。7 项 Node 测试覆盖逐分片 CRLF、跨字节中文、重复/跳号、帧上限、取消 pending read、半帧断线及格式拒绝，已加入 CI；TypeScript/Vite 构建通过。本轮没有数据表迁移，也没有浏览器 E2E 或外部真实性签名验收。
 
 测试执行需要本地线程和 socket 权限。当前环境中受限执行会阻塞 TestClient，因此完整套件及基础设施测试在获得执行权限后运行。测试还有两条第三方 Starlette/AnyIO 弃用警告，不影响断言结果。
 

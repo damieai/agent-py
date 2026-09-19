@@ -151,6 +151,25 @@ def test_postgres_migrations_rls_and_concurrent_budget(tmp_path, monkeypatch):
         assert len(bundle.documents) == 1
         assert bundle.documents[0]["symbol"] == "worker_capacity"
         compiler.validate(p, "demo", "lab", bundle, task_id=task.id)
+        from agent_py.audit import check_recording, export_audit
+        from agent_py.db import Task
+
+        with appdb.snapshot("one") as s:
+            before = s.get(Task, task.id).next_sequence
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                pool.submit(service.stop, p, task.id).result()
+            # Reads remain on the original MVCC snapshot despite the committed cancellation.
+            assert (
+                s.execute(
+                    text("SELECT max(sequence) FROM task_events WHERE task_id=:id"), {"id": task.id}
+                ).scalar()
+                == before
+            )
+            assert s.execute(text("SELECT DISTINCT tenant_id FROM tasks")).scalars().all() == [
+                "one"
+            ]
+        audit = export_audit(service, p, task.id)
+        assert check_recording(audit)["event_count"] == before + 1
     finally:
         get_settings.cache_clear()
         if appdb:

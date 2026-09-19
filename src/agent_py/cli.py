@@ -148,13 +148,33 @@ def ops_status():
 
 @app.command()
 def export(task_id: str, output: Path):
-    from agent_py.replay import export_recording
+    from agent_py.audit import export_audit
 
-    recording = export_recording(build_service(get_settings()), principal(), task_id)
+    recording = export_audit(build_service(get_settings()), principal(), task_id)
     output.write_text(json.dumps(recording, indent=2))
     typer.echo(
         "Exported tenant-scoped recording. Review business-sensitive content before sharing."
     )
+
+
+@app.command()
+def audit_check(recording: Path):
+    """Check a v2 audit package offline; no production service or credentials are loaded."""
+    from agent_py.audit import MAX_RECORDING_BYTES, check_recording
+    from agent_py.domain import DomainError
+
+    with recording.open("rb") as stream:
+        raw = stream.read(MAX_RECORDING_BYTES + 1)
+    if len(raw) > MAX_RECORDING_BYTES:
+        raise typer.BadParameter("Recording exceeds 10 MB")
+    try:
+        report = check_recording(json.loads(raw))
+    except DomainError as exc:
+        typer.echo(f"{exc.code}: {exc.message}", err=True)
+        raise typer.Exit(1) from exc
+    except (ValueError, RecursionError) as exc:
+        raise typer.BadParameter("Invalid recording JSON") from exc
+    typer.echo(json.dumps(report, indent=2))
 
 
 @app.command()

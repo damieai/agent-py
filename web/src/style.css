@@ -15,3 +15,9 @@
 .context-panel .evidence { margin: 12px 0; padding: 12px; background: #f5f8f9; border-radius: 8px; }
 .context-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 360px; overflow: auto; }
 .context-panel .mono { overflow-wrap: anywhere; }
+
+.event-panel { border-top: 1px solid #dce4e7; padding: 12px 0; }
+.event-list { max-height: 420px; overflow: auto; }
+.event-list details { padding: 8px; border-bottom: 1px solid #e8edef; }
+.event-list summary { cursor: pointer; overflow-wrap: anywhere; }
+.event-list pre { white-space: pre-wrap; overflow-wrap: anywhere; }

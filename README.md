@@ -128,3 +128,7 @@ Worker 已接入数据库共享的租户并发上限、FIFO 等待票据和过�
 ## 证据检索与预览
 
 可通过 `AGENT_CONTEXT_STRATEGY=bm25_rrf` 启用 Python 结构分块、BM25 与来源匹配融合排序，保留原文摘要及行号，调用前后复核权限与版本。默认策略仍为 lexical。工作台提供只读证据预览；`agent-py evaluate-retrieval examples/retrieval-development.json` 可在临时数据库比较三个策略。算法、兼容性、开发集结果与限制见[上下文编译说明](docs/retrieval.md)。
+
+## 事件时间线与审计
+
+工作台支持带凭证的 SSE 事件续传、流中授权复核及审计包下载。`agent-py export TASK_ID audit.json` 导出 v2 一致性快照，`agent-py audit-check audit.json` 离线检查事件、审批和动作回执；v2 回放额外约束租户与派发顺序。包摘要不等于真实性或远端状态证明，详见[审计与回放说明](docs/audit-replay.md)。

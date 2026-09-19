@@ -20,4 +20,5 @@ pipelines:
         script:
           - cd web
           - npm ci
+          - npm test
           - npm run build

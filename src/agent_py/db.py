@@ -230,6 +230,22 @@ class Database:
     def create_schema(self):
         Base.metadata.create_all(self.engine)
 
+    @contextlib.contextmanager
+    def snapshot(self, tenant: str):
+        """Read a consistent audit snapshot without blocking task mutations."""
+        if not tenant:
+            raise ValueError("Explicit tenant required")
+        with self.sessions.begin() as s:
+            if self.engine.dialect.name == "postgresql":
+                s.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+                s.execute(
+                    text("SELECT set_config('app.tenant_id', :tenant, true)"), {"tenant": tenant}
+                )
+            else:
+                # sqlite3 legacy transaction mode does not BEGIN on SELECT by itself.
+                s.connection().exec_driver_sql("BEGIN")
+            yield s
+
     def assert_production_role(self):
         if self.engine.dialect.name != "postgresql":
             raise ValueError("Production requires PostgreSQL")
