@@ -1,3 +1,6 @@
 # Keep source digests and JSON patch fixtures stable across developer platforms.
 *.py text eol=lf
 *.json text eol=lf
+# TLC evidence hashes the exact model/config bytes.
+formal/*.tla text eol=lf
+formal/*.cfg text eol=lf

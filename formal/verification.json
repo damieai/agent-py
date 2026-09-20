@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "scope": "finite safety models; no liveness or whole-system proof",
+  "tool": {
+    "release": "v1.7.4",
+    "url": "https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar",
+    "sha256": "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88",
+    "version": "TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)"
+  },
+  "java_version": "openjdk version \"21.0.12\" 2026-07-21\nOpenJDK Runtime Environment (build 21.0.12+8-1-26.04-Ubuntu)\nOpenJDK 64-Bit Server VM (build 21.0.12+8-1-26.04-Ubuntu, mixed mode, sharing)",
+  "inputs": {
+    "toolchain.json": "38e6dfe01b646b21f5579bc3717988cdae6abb4f9a937cba1370c7e4a2af02dc",
+    "Action.cfg": "c263078db71db701c57d403c10e77f3453a4974708025f69c127e3b271ef0cdf",
+    "Action.tla": "c46dd41c46fcb6527ae397e29744b917a6bb31ef2e2094839441c28211d841e7",
+    "UnsafeRemote.cfg": "cb14e4255d7d0629419a679afa8c58a4c85f9edd3898659346166066b010277e",
+    "WorkerLease.cfg": "f5b600931f31717ffe87cef3d55dabdc7fdf5c1e24c80621d20c646633fe87e5",
+    "WorkerLease.tla": "1e2609af38c2ab24156d8ba7392c08f0bbbc318ea390441b0ddc0acea1425128",
+    "UnsafeDispatch.cfg": "b8c75ad7611c9a2598ef58d008838dc2536d04b89278752229b721362e7833c4",
+    "UnsafeRelease.cfg": "07523b89fcf1fcb69060a01631faddec7a534f8931fa90e6be3b23df0b105f24",
+    "UnsafeCompletion.cfg": "fdb64d338ad503392dd9f54ef6e599dbfaae9b53aa313e7dc5c56ec55f27217a"
+  },
+  "cases": [
+    {
+      "case": "Action",
+      "status": "PASS",
+      "returncode": 0,
+      "expected_invariant": null,
+      "generated": 39,
+      "distinct": 14,
+      "trace_actions": []
+    },
+    {
+      "case": "UnsafeRemote",
+      "status": "PASS",
+      "returncode": 12,
+      "expected_invariant": "AtMostOneEffect",
+      "generated": 14,
+      "distinct": 9,
+      "trace_actions": [
+        "Initial predicate",
+        "Approve",
+        "Dispatch",
+        "RemoteCommit",
+        "RemoteCommit"
+      ]
+    },
+    {
+      "case": "WorkerLease",
+      "status": "PASS",
+      "returncode": 0,
+      "expected_invariant": null,
+      "generated": 63,
+      "distinct": 37,
+      "trace_actions": []
+    },
+    {
+      "case": "UnsafeDispatch",
+      "status": "PASS",
+      "returncode": 12,
+      "expected_invariant": "NoStaleDispatch",
+      "generated": 13,
+      "distinct": 9,
+      "trace_actions": [
+        "Initial predicate",
+        "Acquire",
+        "Expire",
+        "Dispatch"
+      ]
+    },
+    {
+      "case": "UnsafeRelease",
+      "status": "PASS",
+      "returncode": 12,
+      "expected_invariant": "NoWrongRelease",
+      "generated": 29,
+      "distinct": 17,
+      "trace_actions": [
+        "Initial predicate",
+        "Acquire",
+        "Expire",
+        "Acquire",
+        "Release"
+      ]
+    },
+    {
+      "case": "UnsafeCompletion",
+      "status": "PASS",
+      "returncode": 12,
+      "expected_invariant": "NoStaleCompletion",
+      "generated": 29,
+      "distinct": 19,
+      "trace_actions": [
+        "Initial predicate",
+        "Acquire",
+        "Dispatch",
+        "Expire",
+        "Complete"
+      ]
+    }
+  ],
+  "status": "PASS"
+}

@@ -143,3 +143,5 @@ Worker 已接入数据库共享的租户并发上限、FIFO 等待票据和过�
 `make evaluation-gate` 在临时仿真环境运行协议评测与检索对照，按固定策略输出通过、失败或证据不足，并以退出码阻止 CI 回归；详见[评测门禁](docs/evaluation-gates.md)。本地通过不代表生产发布获准。
 
 认证支持受控本地 RSA JWKS 轮换和撤钥，无网络密钥发现或旧钥缓存回退；`agent-py auth-keys-check FILE` 可离线核对公钥指纹。配置、Token 兼容性与轮换步骤见[认证说明](docs/authentication.md)。
+
+`make formal-check` 用固定 TLC 检查动作幂等及双 Worker 租约模型，四个负向控制必须产生指定反例；输入摘要、实现测试映射和证明边界见[形式化验证](formal/README.md)。需要本地 Java 和通过摘要校验的 TLC jar。

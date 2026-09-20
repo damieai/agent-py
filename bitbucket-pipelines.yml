@@ -24,3 +24,13 @@ pipelines:
           - npm ci
           - npm test
           - npm run build
+    - step:
+        name: Finite TLA+ safety and negative controls
+        script:
+          - apt-get update && apt-get install -y --no-install-recommends default-jre-headless curl ca-certificates
+          - mkdir -p .runtime/formal-tools
+          - curl --fail --location --retry 3 --max-time 120 https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar --output .runtime/formal-tools/tla2tools.jar
+          - PYTHONPATH=src python scripts/check_formal.py --jar .runtime/formal-tools/tla2tools.jar
+        artifacts:
+          - .runtime/formal/*.json
+          - .runtime/formal/*.log

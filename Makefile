@@ -24,3 +24,7 @@ dispatcher:
 	.venv/bin/agent-py dispatcher --tenant demo
 frontend:
 	npm --prefix web run dev
+
+.PHONY: formal-check
+formal-check:
+	.venv/bin/python scripts/check_formal.py

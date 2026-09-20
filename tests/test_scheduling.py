@@ -182,3 +182,43 @@ def test_late_worker_error_does_not_overwrite_replacement_state(env, task):
     with service.db.session("t1") as s:
         assert s.get(Task, task.id).status == "RUNNING"
         assert s.scalar(select(WorkLease)).owner_token is not None
+
+
+def test_formal_expired_dispatch_trace_without_replacement(env, task):
+    """UnsafeDispatch: Acquire -> Expire -> Dispatch (no replacement needed)."""
+    service = env[0]
+    old, _ = acquire(service, "t1", task.id)
+    assert old
+    with service.db.session("t1") as s:
+        s.scalar(select(WorkLease)).expires_at = now() - timedelta(seconds=1)
+    context = execution_lease.set(("t1", task.id, old))
+    try:
+        with pytest.raises(DomainError) as error:
+            service.reserve("t1", task.id, "expired", 100)
+        assert error.value.code == "WORKER_LEASE_LOST"
+    finally:
+        execution_lease.reset(context)
+
+
+def test_formal_expired_completion_trace_without_replacement(env, task):
+    """UnsafeCompletion: Acquire -> Dispatch -> Expire -> Complete.
+
+    Complete abstracts the local worker-error status update, not external confirmation.
+    """
+    service = env[0]
+    activities = Activities(service)
+    with service.db.session("t1") as s:
+        s.get(Task, task.id).status = "RUNNING"
+
+    def expire_then_fail(*args):
+        with service.db.session("t1") as s:
+            s.scalar(select(WorkLease)).expires_at = now() - timedelta(seconds=1)
+        raise DomainError("LATE_ERROR", "Expired worker failed")
+
+    activities.harness.tick = expire_then_fail
+    result = asyncio.run(activities.tick({"tenant": "t1", "task_id": task.id}))
+    assert result["wait"] == "WORKER_LEASE_LOST"
+    with service.db.session("t1") as s:
+        current = s.get(Task, task.id)
+        assert current.status == "RUNNING"
+        assert current.waiting_reason != "LATE_ERROR"
