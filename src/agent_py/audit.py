@@ -7,7 +7,7 @@ from pydantic import Field, ValidationError
 from sqlalchemy import select
 
 from agent_py.db import Approval, Artifact, Operation, Task, TaskEvent, tenant_get
-from agent_py.domain import APPROVAL_TOOLS, Contract, DomainError, TaskContract, digest
+from agent_py.domain import APPROVAL_TOOLS, Contract, DomainError, ReleaseId, TaskContract, digest
 from agent_py.security import authorize
 
 MAX_RECORDING_BYTES = 10_000_000
@@ -54,7 +54,7 @@ class AuditArtifact(Contract):
 
 class AuditBody(Contract):
     schema_version: Literal["recording-v2"] = Field(alias="schema")
-    release: Literal["agent-v1"]
+    release: ReleaseId
     mode: Literal["simulation", "live"]
     task: AuditTask
     operations: list[AuditOperation] = Field(max_length=100)
@@ -87,6 +87,11 @@ def check_recording(recording: dict) -> dict:
         reject("Event sequence contains a gap, duplicate or reorder")
     if not body.events or body.events[0].type != "task.created":
         reject("Missing task creation event")
+    if (
+        body.release != body.task.contract.release_id
+        or body.events[0].payload.get("release") != body.release
+    ):
+        reject("Task and creation event do not bind the recorded release")
     for op in body.operations:
         if (
             set(op.request) != {"tool", "resource", "parameters"}

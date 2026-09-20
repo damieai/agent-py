@@ -271,6 +271,36 @@ def test_postgres_migrations_rls_and_concurrent_budget(tmp_path, monkeypatch):
             row for row in dependency_status(service, "one") if row["dependency"] == "bulkhead"
         )
         assert status["active_reads"] == status["read_limit"] == 2
+
+        # The dispatcher JSON release filter must work under PostgreSQL FORCE RLS.
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        from sqlalchemy import select
+
+        from agent_py.db import Task
+        from agent_py.runtime import dispatch_once
+
+        foreign_release = service.create_task(
+            p,
+            TaskContract(kind="repair", project="demo", goal="Release filter probe"),
+            "release-filter",
+        )
+        with appdb.session("one") as s:
+            row = s.get(Task, foreign_release.id)
+            row.contract = {**row.contract, "release_id": "sha256:" + "a" * 64}
+        client = AsyncMock()
+        asyncio.run(dispatch_once(service, client, "one"))
+        assert client.start_workflow.await_count > 0
+        assert all(
+            call.kwargs["id"] != f"agent:one:{foreign_release.id}"
+            and call.args[1]["tenant"] == "one"
+            for call in client.start_workflow.call_args_list
+        )
+        with appdb.session("one") as s:
+            assert not s.scalar(
+                select(Outbox).where(Outbox.task_id == foreign_release.id)
+            ).delivered
     finally:
         get_settings.cache_clear()
         if appdb:

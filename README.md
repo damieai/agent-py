@@ -145,3 +145,5 @@ Worker 已接入数据库共享的租户并发上限、FIFO 等待票据和过�
 认证支持受控本地 RSA JWKS 轮换和撤钥，无网络密钥发现或旧钥缓存回退；`agent-py auth-keys-check FILE` 可离线核对公钥指纹。配置、Token 兼容性与轮换步骤见[认证说明](docs/authentication.md)。
 
 `make formal-check` 用固定 TLC 检查动作幂等及双 Worker 租约模型，四个负向控制必须产生指定反例；输入摘要、实现测试映射和证明边界见[形式化验证](formal/README.md)。需要本地 Java 和通过摘要校验的 TLC jar。
+
+可选 `release-build` / `release-check` 将源码、运行配置和重算后的评测证据绑定为发布摘要；任务和 Temporal 队列固定到该版本，配置漂移拒绝新派发。启用顺序、旧任务恢复和证明边界见[发布版本说明](docs/releases.md)。

@@ -1,0 +1,66 @@
+# 固定任务执行版本
+
+可选的 `AgentRelease` v1 把任务从通用 `agent-v1` 标签绑定到 `sha256:<摘要>`。同一任务只允许匹配版本的 Service 创建新动作或预占/派发推理；Dispatcher 在数据库查询中筛选该版本，再应用批量上限。Worker 使用 `<基础队列>-<完整摘要>`，新旧版本不会共用消费队列。未配置发布清单时继续使用旧模式；生产配置目前也未强制启用，因此不宣称所有部署均已固定版本。
+
+## 清单包含什么
+
+- `src/agent_py` 全部 Python 文件，以及迁移 Python 文件、`pyproject.toml` 和 `uv.lock` 的精确字节摘要。内嵌 Prompt、工具类型、上下文实现和 Workflow 随代码绑定。
+- 执行模式、模型 ID、输入/输出价格、上下文策略、基础任务队列、沙盒镜像配置和超时。
+- collection/repair 清单的内容摘要及 Python oracle 树摘要；不保存部署绝对路径，允许相同内容在另一受控路径部署。
+- 原始评测策略、仿真报告、基线/候选检索报告和 fixture，以及重算得到的门禁摘要。构建和加载都必须重算 PASS，候选检索策略必须等于发布的上下文策略。
+
+发布 ID 使用严格类型解析后的规范 JSON 计算，格式化和字段顺序不改变身份。重复字段、未知顶层字段和非有限 JSON 数字拒绝加载。发布文件读取上限 10 MB，单个代码/配置文件上限 10 MB，单树最多 1000 个匹配文件；拒绝最终路径符号链接、FIFO 和设备，源码树也拒绝符号链接。父目录由部署方控制。输出采用独占创建和 0600 权限，不覆盖已有发布。
+
+凭证、Grant、停用策略、任务取消/接管、预算和运行资源限额不进入清单；它们继续实时生效。发布固定不能打开原本关闭的模型或候选执行开关，也不能赋予写入权限。live executor 仍拒绝未经验收的外部写入。
+
+## 构建和预检
+
+先运行现有评测脚本生成本地证据。示例策略的候选为 `bm25_rrf`，构建与运行配置必须一致：
+
+```bash
+make evaluation-gate
+mkdir -p .runtime/releases
+AGENT_CONTEXT_STRATEGY=bm25_rrf .venv/bin/agent-py release-build \
+  .runtime/releases/candidate.json
+```
+
+命令输出 `release_id`，并明确 `production_ready: false`。可以通过 `--policy`、`--simulation`、`--baseline`、`--candidate`、`--fixture` 和 `--root` 指定输入。请在隔离的构建环境设置与目标运行版本一致的配置；不要把评测生成过程接入真实生产系统。
+
+核对并通过独立部署配置分发这个 ID。不能让运行进程从清单自身读取摘要后自动信任：
+
+```bash
+# 将下面占位符替换为构建命令输出并经审核的完整 ID。
+AGENT_CONTEXT_STRATEGY=bm25_rrf .venv/bin/agent-py release-check \
+  .runtime/releases/candidate.json sha256:REPLACE_WITH_64_HEX --root .
+```
+
+预检只访问本地文件，不连接数据库、Temporal 或模型。部署设置同时提供：
+
+```dotenv
+AGENT_RELEASE_MANIFEST=/app/releases/candidate.json
+AGENT_RELEASE_EXPECTED_ID=sha256:REPLACE_WITH_64_HEX
+AGENT_RELEASE_ROOT=/app
+AGENT_CONTEXT_STRATEGY=bm25_rrf
+```
+
+当前要求以源码 checkout 部署，`release_root/src/agent_py` 必须是实际导入的包目录。API、Worker 和 Dispatcher 启动时核对独立 pin、实际代码/锁文件、原始评测和运行配置，不匹配则拒绝启动。代码和依赖以只读文件系统部署，更新后必须重启；不支持 wheel-only 安装或进程内热替换。清单加载后保留在进程内存中，覆盖磁盘上的清单不会切换运行版本。
+
+每次可执行检查会核对任务版本、当前运行配置及绑定文件摘要，readiness 也做这些检查；配置/绑定内容漂移返回 `RELEASE_MISMATCH` 或 readiness 503。`/health/live` 提供当前 release_id，不暴露清单内容。原始 fixture 和报告可能含业务内容，应按部署资料管理清单，不能作为公开健康接口内容。
+
+## 升级、旧任务和回滚
+
+1. **启用前先升级或停止全部旧 Dispatcher。** 本功能引入前的 Dispatcher 不识别版本，不能和启用 pin 的新 API 混用，否则可能把新任务启动到旧队列。需要协调发布，不能声称跨任意历史二进制安全滚动升级。
+2. 为每个仍有未完成任务的版本保留对应代码、清单、独立 pin、Worker 和 Dispatcher；新 API 指向候选版本。Dispatcher 使用原稳定 Workflow ID，只对本版本未确认 Outbox 派发；Temporal 连接失败仍保留 Outbox。
+3. API 请求省略 release_id 或传 `agent-v1` 表示新任务采用当前服务版本；显式 SHA 必须匹配。原请求键再次提交时返回原任务，不因为 API 升级改写版本；请求内容改变仍冲突。数据库保存原请求摘要和实际绑定版本，两者用途不同。
+4. 禁止改写既有任务的 release_id 来迁移任务。恢复旧任务要恢复匹配版本；回滚 API 只影响之后新建的任务。旧 Worker 排空与灰度比例仍由部署方操作，尚无自动排空控制器。
+5. 错版本进程仍可执行有权限的取消/接管、读取审计及查询迟到外部回执。Reconciler 不被执行版本检查阻断，UNKNOWN 不能因版本变更被遗弃。授权和远端读取凭证仍需有效；恢复进程必须配置正确的执行模式与渠道，发布 pin 本身不能跨渠道提供回执。
+
+审计 v2 记录清单 ID，并要求包头、任务契约和创建事件一致。审计包仅包含发布 ID，离线验证时需另外保留对应清单；审计签名不自动签署这个独立文件。
+
+## 证据和边界
+
+默认测试覆盖版本固定、幂等重试、源码/门禁/绑定篡改、未知显式版本、未固定 Worker 拒绝固定任务、配置漂移、实时撤权与停用、旧动作继续对账、发布队列过滤、防止其他版本积压占满批次、审计版本一致性、CLI 无数据库预检和文件安全边界。原生 PostgreSQL FORCE RLS 下验证 JSON 版本过滤；真实本地 Temporal 验证专属队列、重建 Service 后派发和取消恢复。
+
+这是一份本地可复核的运行版本清单，不是完整供应链证明。文件摘要不证明评测确实由该代码执行；自报报告仍可能伪造，当前门禁也不衡量真实模型质量、成本或时延。没有签名发布、可信构建证明、安装依赖实物校验、应用镜像 digest 验证、上游模型不可变版本证明或真实灰度门禁。代码摘要只在启动时核对，不证明内存中的导入模块没有被修改；清单、代码、绑定文件和父目录需要只读部署，检查到使用之间的恶意修改不在保证内。沙盒镜像字段按配置绑定，镜像不可变性继续由现有沙盒适配器负责。
+
+repair 清单指向的本地业务源码由已有修复协议在首次运行时冻结；发布摘要并不包含整个外部 checkout，也不冻结知识库内容。授权、原文版本检查与修复快照校验继续独立生效。两代版本同时访问数据库是否兼容仍须单独验证迁移；本轮没有数据库结构变更。

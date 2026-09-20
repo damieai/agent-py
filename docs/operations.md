@@ -49,3 +49,5 @@ API 返回 `X-Trace-ID`，同一 span 中写入的任务事件携带 trace ID。
 示例告警阈值是运维起点，尚未证明目标 SLO。生产上线仍需负载测试、告警送达演练、账单校准、迁移回滚和备份恢复。
 
 企业证据读取增加共享熔断、活动读取名额/上限以及容量拒绝指标，已加入告警及 Grafana 模板；租户级数据库 gauge 继续按 max 聚合。具体恢复命令和界限见[依赖故障治理](dependency-resilience.md)。
+
+启用发布固定后，Outbox 按发布摘要分流。积压时同时核对任务 release_id、对应 Dispatcher/Worker 的独立 pin 和专属队列；禁止修改任务发布 ID 强行迁移。启用前需要先升级或停止不识别版本的旧 Dispatcher，详见[发布操作步骤](releases.md)。

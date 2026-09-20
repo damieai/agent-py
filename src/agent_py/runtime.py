@@ -117,9 +117,15 @@ async def dispatch_once(service: Service, client, tenant: str):
     from sqlalchemy import select
 
     with service.db.session(tenant) as s:
+        service.release.check()
         rows = s.scalars(
             select(Outbox)
-            .where(Outbox.tenant_id == tenant, Outbox.delivered.is_(False))
+            .join(Task, (Task.id == Outbox.task_id) & (Task.tenant_id == Outbox.tenant_id))
+            .where(
+                Outbox.tenant_id == tenant,
+                Outbox.delivered.is_(False),
+                Task.contract["release_id"].as_string() == service.release.id,
+            )
             .order_by(Outbox.created_at, Outbox.id)
             .limit(20)
         ).all()
@@ -129,7 +135,7 @@ async def dispatch_once(service: Service, client, tenant: str):
                 AgentWorkflow.run,
                 {"tenant": tenant, "task_id": row.task_id},
                 id=f"agent:{tenant}:{row.task_id}",
-                task_queue=service.settings.task_queue,
+                task_queue=service.release.task_queue,
             )
         except WorkflowAlreadyStartedError:
             pass
@@ -170,7 +176,7 @@ async def serve_worker(settings: Settings):
     client = await Client.connect(settings.temporal_address, namespace=settings.temporal_namespace)
     worker = Worker(
         client,
-        task_queue=settings.task_queue,
+        task_queue=service.release.task_queue,
         workflows=[AgentWorkflow],
         activities=[Activities(service).tick],
         max_concurrent_activities=settings.worker_activity_limit,

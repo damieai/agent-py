@@ -473,3 +473,72 @@ def analyze(
         p.tenant_id, t.id, "model-analysis", json.dumps(data).encode()
     )
     typer.echo(f"Saved analysis artifact {a.id}; no proposed action was executed")
+
+
+@app.command()
+def release_build(
+    output: Path,
+    policy: Path = Path("examples/evaluation-gate-policy.json"),
+    simulation: Path = Path(".runtime/gate/simulation.json"),
+    baseline: Path = Path(".runtime/gate/retrieval.json"),
+    candidate: Path = Path(".runtime/gate/retrieval.json"),
+    fixture: Path = Path("examples/retrieval-development.json"),
+    root: Path = Path("."),
+):
+    """Bind local source/configuration to recomputed evidence; does not authorize deployment."""
+    from agent_py.domain import DomainError
+    from agent_py.releases import (
+        GateEvidence,
+        create_release,
+        decode_json,
+        read_regular,
+        release_id,
+        write_release,
+    )
+
+    try:
+        evidence = GateEvidence.model_validate(
+            {
+                name: decode_json(read_regular(path))
+                for name, path in {
+                    "policy": policy,
+                    "simulation": simulation,
+                    "baseline": baseline,
+                    "candidate": candidate,
+                    "fixture": fixture,
+                }.items()
+            }
+        )
+        release = create_release(get_settings(), root.resolve(), evidence)
+        write_release(release, output)
+    except (DomainError, OSError, ValueError, TypeError, RecursionError):
+        typer.echo(
+            "Release build failed: check evidence, runtime settings and output path", err=True
+        )
+        raise typer.Exit(1) from None
+    typer.echo(json.dumps({"release_id": release_id(release), "production_ready": False}))
+
+
+@app.command()
+def release_check(manifest: Path, expected_id: str, root: Path = Path(".")):
+    """Check a release against this process's checkout and settings, without Service or network."""
+    from agent_py.domain import DomainError
+    from agent_py.releases import ReleaseGuard
+
+    settings = get_settings().model_copy(
+        update={
+            "release_manifest": manifest,
+            "release_expected_id": expected_id,
+            "release_root": root,
+        }
+    )
+    try:
+        guard = ReleaseGuard(settings)
+    except DomainError as exc:
+        typer.echo(f"{exc.code}: {exc.message}", err=True)
+        raise typer.Exit(1) from None
+    typer.echo(
+        json.dumps(
+            {"release_id": guard.id, "task_queue": guard.task_queue, "production_ready": False}
+        )
+    )

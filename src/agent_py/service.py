@@ -68,8 +68,10 @@ def validate_parameters(tool: str, p: dict):
 class Service:
     def __init__(self, db: Database, settings: Settings, remote):
         self.db, self.settings, self.remote = db, settings, remote
+        from agent_py.releases import ReleaseGuard
         from agent_py.telemetry import Telemetry
 
+        self.release = ReleaseGuard(settings)
         self.telemetry = Telemetry(settings)
         self.reconcile_cursors: dict[str, str] = {}
 
@@ -95,13 +97,16 @@ class Service:
                             "IDEMPOTENCY_CONFLICT", "Key already binds another request"
                         )
                     return existing
+                self.release.check()
+                if contract.release_id not in {"agent-v1", self.release.id}:
+                    raise DomainError("RELEASE_MISMATCH", "Requested release is not served here")
                 task = Task(
                     id=uid(),
                     tenant_id=p.tenant_id,
                     request_key=key,
                     request_digest=digest(body),
                     principal=p.subject,
-                    contract=body,
+                    contract={**body, "release_id": self.release.id},
                     deadline=now() + timedelta(seconds=contract.deadline_seconds),
                 )
                 authorize(s, p, task, "developer" if contract.kind == "repair" else "operator")
@@ -126,9 +131,7 @@ class Service:
                 s.add(task)
                 s.flush()
                 s.add(Outbox(tenant_id=p.tenant_id, task_id=task.id))
-                emit(
-                    s, task, "task.created", {"kind": contract.kind, "release": contract.release_id}
-                )
+                emit(s, task, "task.created", {"kind": contract.kind, "release": self.release.id})
                 return task
         except IntegrityError:
             # Resolve concurrent duplicate creation through the same authorization path.
@@ -317,6 +320,7 @@ class Service:
         from agent_py.scheduling import check_execution_lease
 
         check_execution_lease(s, t)
+        self.release.check(t.contract["release_id"])
         if t.cancelled or t.taken_over or t.status == "TERMINATED":
             raise DomainError("TASK_STOPPED", "Task cannot dispatch new actions")
         if aware(t.deadline) <= now():

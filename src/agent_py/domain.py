@@ -1,7 +1,7 @@
 import hashlib
 import json
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -23,6 +23,9 @@ class Principal(Contract):
     environments: list[str]
 
 
+ReleaseId = Annotated[str, Field(pattern=r"^(agent-v1|sha256:[a-f0-9]{64})$")]
+
+
 class TaskContract(Contract):
     kind: Literal["repair", "incident"]
     workflow: Literal["investigate", "repair_candidate"] = "investigate"
@@ -32,7 +35,7 @@ class TaskContract(Contract):
     resource: str = Field(default="demo-service", pattern=r"^[a-zA-Z0-9_.:/-]{1,160}$")
     budget_micro_usd: int = Field(default=1_000_000, gt=0, le=100_000_000)
     deadline_seconds: int = Field(default=1800, ge=30, le=86400)
-    release_id: Literal["agent-v1"] = "agent-v1"
+    release_id: ReleaseId = "agent-v1"
 
     @model_validator(mode="after")
     def repair_workflow(self):

@@ -13,6 +13,7 @@ pipelines:
           - AGENT_DATABASE_URL=sqlite:///.runtime/ci-migrations.db .venv/bin/alembic check
           - .venv/bin/pytest -q --junitxml=.runtime/tests.xml
           - .venv/bin/python scripts/check_evaluation_gate.py
+          - AGENT_CONTEXT_STRATEGY=bm25_rrf .venv/bin/agent-py release-build .runtime/gate/release.json
         artifacts:
           - .runtime/tests.xml
           - .runtime/gate/*.json

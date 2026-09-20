@@ -4,3 +4,6 @@
 # TLC evidence hashes the exact model/config bytes.
 formal/*.tla text eol=lf
 formal/*.cfg text eol=lf
+# Release manifests hash these dependency declarations byte-for-byte.
+/pyproject.toml text eol=lf
+/uv.lock text eol=lf

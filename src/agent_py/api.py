@@ -179,6 +179,7 @@ def create_app(
     def live():
         return {
             "status": "ok",
+            "release_id": service.release.id,
             "mode": settings.execution_mode,
             "repair_enabled": settings.allow_candidate_execution and settings.allow_model_api,
             "audit_signing_configured": settings.audit_signing_manifest is not None,
@@ -186,6 +187,10 @@ def create_app(
 
     @app.get("/health/ready")
     def ready():
+        try:
+            service.release.check()
+        except DomainError:
+            return JSONResponse({"status": "release_mismatch"}, status_code=503)
         try:
             with db.engine.connect() as conn:
                 conn.execute(text("SELECT 1 FROM tasks LIMIT 1"))

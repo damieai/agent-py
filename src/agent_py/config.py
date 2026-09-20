@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     temporal_address: str = "localhost:7233"
     temporal_namespace: str = "default"
     task_queue: str = "agent-py-v1"
+    release_manifest: Path | None = None
+    release_expected_id: str = Field(default="", pattern=r"^(|sha256:[a-f0-9]{64})$")
+    release_root: Path = Path(".")
     model_id: str = ""
     collection_manifest: Path | None = None
     sandbox_image: str = ""
@@ -54,6 +57,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production(self):
+        if bool(self.release_manifest) != bool(self.release_expected_id):
+            raise ValueError(
+                "Release manifest and independent expected ID must be configured together"
+            )
         if self.auth_public_key and self.auth_jwks_file is not None:
             raise ValueError("Configure exactly one RSA source: public key or local JWKS")
         if self.environment == "production":
