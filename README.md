@@ -153,3 +153,5 @@ Worker 已接入数据库共享的租户并发上限、FIFO 等待票据和过�
 可选[发布签名与撤销](docs/release-signing.md)使用独立公钥策略和短期 Ed25519 证明；同版本续签不改变队列，撤钥或到期阻止新派发，保留取消和对账。
 
 `make browser-test` 运行 Chromium 工作台验收，连接独立临时 FastAPI/SQLite 与仿真渠道，覆盖审批、接管恢复/取消、撤权清屏、下载和凭证切换竞态。安装步骤、报告位置及边界见[浏览器测试](docs/browser-testing.md)。
+
+`make recovery-check` 运行 Linux 进程硬杀与原生 Temporal Worker 重启演练，输出四个场景、同版本历史回放及源码/证据摘要。跳过或缺失证据会判失败；默认 360 秒租约带来的恢复延迟没有被隐藏。运行方式和未覆盖范围见[恢复演练](docs/process-recovery.md)。

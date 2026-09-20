@@ -32,3 +32,7 @@ formal-check:
 .PHONY: browser-test
 browser-test:
 	npm --prefix web run test:e2e
+
+.PHONY: recovery-check
+recovery-check:
+	.venv/bin/python scripts/check_recovery.py

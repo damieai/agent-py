@@ -36,6 +36,8 @@
 
 ## 本地环境限制
 
+可运行 `make recovery-check` 做隔离 Worker 进程故障演练，检查 `.runtime/recovery/run-*/report.json` 中四个场景与 JUnit 是否全部通过。详细边界见[恢复演练](process-recovery.md)。默认名额租约 360 秒；硬杀后 `DUPLICATE_TICK` 可能是有效旧租约的保护，不能删租约或换 operation_id 强行重发。保持 Reconciler 对账；无远端回执时 UNKNOWN 仍需人工核对。
+
 本次环境 Docker Desktop 未接入 WSL，无法验收容器镜像、沙盒系统调用隔离与 kind 集群。PostgreSQL 和 Temporal 可通过原生测试服务验证。前端构建通过不代表浏览器 E2E 已通过。
 ## 接管与恢复
 

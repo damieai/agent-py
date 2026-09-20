@@ -1,5 +1,16 @@
 image: python:3.12-slim
 pipelines:
+  custom:
+    recovery-drill:
+      - step:
+          name: Native worker process recovery drill
+          max-time: 10
+          script:
+            - pip install uv==0.12.17
+            - uv sync --extra dev --frozen
+            - .venv/bin/python scripts/check_recovery.py
+          artifacts:
+            - .runtime/recovery/**
   default:
     - step:
         name: Python contract and fault tests
