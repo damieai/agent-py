@@ -4,7 +4,7 @@
 
 本文件同时保留完整路线和当前实现证据。**整个 B00—B12 尚未完成**。当前支持持久化仿真、只读模型调查及有界候选修复，可按运维清单采集四类企业资源。模型补丁已连接沙盒编排和人工审阅；尚未用真实模型与 Docker 完成该闭环验收，不能描述为已完成生产交付。
 
-新增执行证据：live Worker 可对已导入的授权证据执行一次模型调查，保存上下文清单和分析产物并进入人工审阅。请求摘要绑定推理身份，校验后的决策与预算结算同事务保存，支持产物写入失败后的恢复；未知响应不重发。该路径已用模拟 HTTP 验证，尚未使用真实付费模型验收。
+新增执行证据：live Worker 支持单次分析与显式选择的最多三轮只读调查，保存冻结上下文和分析产物并进入人工审阅。请求摘要绑定推理身份，校验后的决策与预算结算同事务保存，支持产物写入失败后的恢复；未知响应不重发。调查工作台、状态接口及报告下载复核当前证据权限。该路径已用模拟 HTTP 和真实 Chromium 验证，尚未使用真实付费模型验收。
 
 ## 架构与核心契约
 
@@ -17,7 +17,7 @@
 
 ## API 与类型
 
-已实现：TaskContract、Principal、ActionProposal、ApprovalDecision、EvidenceRef、ModelDecision、Operation、ContextBundle、FileEdit 和 Artifact。
+已实现：TaskContract、Principal、ActionProposal、ApprovalDecision、EvidenceRef、ModelDecision、InvestigationDecision、Operation、ContextBundle、FileEdit 和 Artifact。
 
 已实现的 HTTP 接口：
 
@@ -31,6 +31,7 @@
 | GET /operations/{id} | 动作确认及恢复状态 |
 | GET /tasks/{id}/events | 带序号 SSE，续传、JWT/Grant 复核、历史缺口及终止信号 |
 | GET /tasks/{id}/recording | v2 一致性审计快照下载，当前授权及修复角色复核 |
+| GET /tasks/{id}/investigation | 冻结轮次、类型化决策、引用、费用与停止原因；读取者文档 ACL 复核 |
 | GET /artifacts/{id} | 重新鉴权、摘要校验和安全下载 |
 | POST /tasks/{id}/context/preview | 当前用户范围内只读证据预览、行号与预算 |
 | POST /webhooks/connector | 签名、时间窗、Inbox 去重；通知仅触发查询 |
@@ -144,6 +145,7 @@ AgentRelease v1 已有本地清单和运行时绑定；任务中途修订、评�
 - [x] 当前授权证据预览、来源/版本/行号与片段正文、预算遗漏展示；前端构建验证。
 - [x] 实时 SSE 工作台、游标续传、撤权清空与终止信号，7 项 Node 流解析测试；审计包下载。
 - [x] Chromium + 生产前端构建 + 真实临时 FastAPI/SQLite 的七项 E2E：审批闭环、接管恢复/取消、SSE 撤权、证据与审计下载及凭证切换竞态；外部系统为仿真，Activity 由测试驱动。
+- [x] 有界调查任务创建与逐轮工作台、只读状态 API/CLI、报告下载的冻结证据复核；浏览器覆盖两轮模拟模型调查、文档撤权清空和迟到响应隔离。
 - [ ] 多浏览器/移动/真实模型修复页面验收、中途修订及更多可恢复人工操作；远端浏览器 CI 实测。
 
 验收：不读后台日志也能辨认批准对象、实际副作用与未决结果。

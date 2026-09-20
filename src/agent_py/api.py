@@ -300,6 +300,15 @@ def create_app(
 
         return {"repair": repair_details(service, p, task_id)}
 
+    @app.get("/api/v1/tasks/{task_id}/investigation")
+    def investigation(task_id: str, p: Auth):
+        from agent_py.investigation_status import investigation_details
+
+        return JSONResponse(
+            {"investigation": investigation_details(service, p, task_id)},
+            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+        )
+
     @app.get("/api/v1/tasks/{task_id}/recording")
     def recording(task_id: str, p: Auth, signed: bool = False):
         from agent_py.audit import export_audit

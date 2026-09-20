@@ -415,6 +415,45 @@ def verify_patch(task_id: str, source: Path, patch_file: Path):
 
 
 @app.command()
+def investigation_create(
+    goal: str,
+    kind: str = "incident",
+    resource: str = "demo-service",
+    request_key: str = typer.Option(...),
+):
+    """Create a bounded read-only investigation using the local demo operator identity."""
+    if kind not in {"repair", "incident"}:
+        raise typer.BadParameter("Use repair or incident")
+    service = build_service(get_settings())
+    task = service.create_task(
+        principal(),
+        TaskContract(
+            kind=kind,
+            workflow="investigation_loop",
+            goal=goal,
+            project="demo",
+            resource=resource,
+        ),
+        request_key,
+    )
+    typer.echo(task.id)
+
+
+@app.command()
+def investigation_status(task_id: str):
+    """Inspect frozen rounds without dispatching inference or collecting evidence."""
+    from agent_py.investigation_status import investigation_details
+
+    typer.echo(
+        json.dumps(
+            investigation_details(build_service(get_settings()), principal(), task_id),
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
+
+
+@app.command()
 def repair_create(goal: str, resource: str = "demo-service", request_key: str = typer.Option(...)):
     """Create a bounded live candidate-repair task; configured Worker advances it."""
     service = build_service(get_settings())

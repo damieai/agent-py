@@ -2,8 +2,8 @@ import { expect, test, type APIRequestContext, type Page } from '@playwright/tes
 
 type Session = { id: string; owner: string; reviewer: string; outsider: string };
 const control = () => ({ 'X-E2E-Key': process.env.E2E_CONTROL_KEY! });
-async function session(request: APIRequestContext): Promise<Session> {
-  const response = await request.post('/__test/session', { headers: control() });
+async function session(request: APIRequestContext, investigation = false): Promise<Session> {
+  const response = await request.post(`/__test/session?investigation=${investigation}`, { headers: control() });
   expect(response.ok()).toBeTruthy();
   return response.json();
 }
@@ -192,4 +192,85 @@ test('an incomplete credential stays editable and a valid replacement works', as
   await login(page, identity.owner);
   await create(page, 'Browser valid credential replacement');
   await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+async function createInvestigation(page: Page, request: APIRequestContext) {
+  const identity = await session(request, true);
+  await page.goto('/');
+  await login(page, identity.owner);
+  await expect(page.getByLabel('执行范围')).toBeEnabled();
+  await page.getByLabel('任务路径').selectOption('incident');
+  await page.getByLabel('执行范围').selectOption('investigation_loop');
+  const id = await create(page, 'Browser queue investigation');
+  return {identity, id};
+}
+
+test('two-round investigation exposes evidence, costs and review without executing model markup', async ({ page, request }) => {
+  const {identity, id} = await createInvestigation(page, request);
+  const panel = page.getByRole('region', { name: '只读调查过程' });
+  await expect(panel).toContainText('等待 Worker 开始调查');
+  expect((await tick(request, identity, id)).wait).toBe('INVESTIGATION_CONTINUE');
+  await expect(panel).toContainText('BROWSER_HYPOTHESIS');
+  await expect(panel).toContainText('已计费用 $0.000050');
+  expect((await tick(request, identity, id)).wait).toBe('HUMAN_REVIEW');
+  await expect(panel.locator('.investigation-round')).toHaveCount(2);
+  await expect(panel).toContainText('模型结束调查');
+  await expect(panel).toContainText('BROWSER_CONCLUSION <script>untrusted</script>');
+  await expect(panel.locator('script')).toHaveCount(0);
+  await panel.locator('summary').last().click();
+  await expect(panel).toContainText('fixture://browser/followup');
+  await expect(panel).toContainText('模型引用');
+  const detail = await request.get(`/api/v1/tasks/${id}`, {headers: {Authorization: `Bearer ${identity.owner}`}});
+  const task = await detail.json();
+  expect(task.contract.workflow).toBe('investigation_loop');
+  expect(task.contract.kind).toBe('incident');
+  expect(task.operations).toEqual([]);
+  expect(task.result).toBeNull();
+  const downloaded = page.waitForEvent('download');
+  await page.getByRole('button', {name: /^model-analysis/}).click();
+  const stream = await (await downloaded).createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream!) chunks.push(Buffer.from(chunk));
+  const report = JSON.parse(Buffer.concat(chunks).toString());
+  expect(report.rounds).toHaveLength(2);
+  expect(report.stop_reason).toBe('MODEL_STOP');
+});
+
+test('document revocation clears investigation content and blocks existing report download', async ({ page, request }) => {
+  const {identity, id} = await createInvestigation(page, request);
+  await tick(request, identity, id);
+  const result = await tick(request, identity, id);
+  const panel = page.getByRole('region', {name: '只读调查过程'});
+  await expect(panel).toContainText('BROWSER_CONCLUSION');
+  expect((await request.post(`/__test/${identity.id}/revoke-evidence`, {headers: control()})).ok()).toBeTruthy();
+  await expect(panel).toContainText('调查内容已清除');
+  await expect(panel.locator('.investigation-round')).toHaveCount(0);
+  await expect(page.getByLabel('访问凭证')).toHaveValue(identity.owner);
+  const artifact = await request.get(`/api/v1/artifacts/${result.artifact_id}`, {headers: {Authorization: `Bearer ${identity.owner}`}});
+  expect(artifact.status()).toBe(409);
+  expect(await artifact.text()).not.toContain('BROWSER_CONCLUSION');
+});
+
+test('late investigation result cannot restore content after credential replacement', async ({ page, request }) => {
+  const {identity, id} = await createInvestigation(page, request);
+  await tick(request, identity, id);
+  await expect(page.locator('.investigation-summary')).toContainText('BROWSER_HYPOTHESIS');
+  let release!: () => void;
+  let captured!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const ready = new Promise<void>(resolve => { captured = resolve; });
+  await page.route('**/investigation', async route => {
+    const response = await route.fetch();
+    captured();
+    await gate;
+    await route.fulfill({response}).catch(() => {}); // Old component aborts its fetch on unmount.
+  });
+  await ready;
+  await page.getByRole('button', {name: '清除', exact: true}).click();
+  await login(page, identity.reviewer);
+  release();
+  await page.waitForTimeout(500);
+  await expect(page.locator('.investigation-summary')).toHaveCount(0);
+  await expect(page.locator('article h2')).toHaveText('选择一个任务');
+  await page.unroute('**/investigation');
 });

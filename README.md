@@ -99,7 +99,7 @@ agent-py analyze TASK_ID INPUT_MICRO_USD_PER_TOKEN OUTPUT_MICRO_USD_PER_TOKEN --
 
 新导入与采集的证据绑定任务；未变化的采集内容按摘要去重。旧版本未绑定任务的文档仍按原项目 ACL 共享，迁移不会自动猜测其归属。采集省略构建参数及 Pod 配置，但工单与 PR 正文仍可能包含业务敏感信息，需要按企业出站规则选择来源。真实账号联调尚未完成。
 
-需要多轮只读调查时，通过 API 显式选择 `workflow=investigation_loop`：模型可提出下一轮授权证据检索查询，最多三轮；每轮冻结输入并恢复已结算决策，重复查询、无证据或无增量时停止，最终交由人工审阅。配置、请求示例和恢复边界见[有界调查说明](docs/investigation-loop.md)。
+需要多轮只读调查时，在 live 工作台选择“多轮只读调查”，或通过 API/CLI 创建 `workflow=investigation_loop` 任务：最多三轮，冻结输入并恢复已结算决策，重复查询、无证据或无增量时停止。工作台展示每轮假设、引用与费用；状态与报告下载复核读取者的冻结证据权限。配置、请求示例和恢复边界见[有界调查说明](docs/investigation-loop.md)。
 
 ## 有界候选修复
 

@@ -68,6 +68,10 @@ class ArtifactStore:
                     "Repair artifacts require task ownership or operator role",
                     403,
                 )
+        if t.contract.get("workflow") == "investigation_loop" and a.kind == "model-analysis":
+            from agent_py.investigation_status import authorized_rounds
+
+            authorized_rounds(self.db, principal, t)
         location = self.root / a.storage_key
         if location.parent.resolve() != self.root or location.is_symlink():
             raise DomainError("ARTIFACT_PATH", "Invalid artifact path", 403)

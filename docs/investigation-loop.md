@@ -7,7 +7,7 @@
 1. 运行 `make migrate`，升级至 `0011_investigation_rounds`。
 2. 在 API 与 Worker 使用一致配置：`AGENT_EXECUTION_MODE=live`、`AGENT_ALLOW_MODEL_API=true`、模型 ID、API key、实际正数输入/输出单价。现有租户、Grant、任务和每日费用上限继续适用。
 3. 可配置 `AGENT_COLLECTION_MANIFEST`，首次冻结上下文前采集匹配租户、项目、环境、资源和主体的固定企业来源。或者使用 `agent-py ingest` 导入任务证据。
-4. 使用认证请求创建任务，例如向 `POST /api/v1/tasks` 提交以下 JSON，并设置唯一的 `Idempotency-Key`：
+4. 在 live 工作台选择研发或运维任务路径，执行范围选择“多轮只读调查（最多三轮）”。也可向 `POST /api/v1/tasks` 提交以下 JSON，并设置唯一的 `Idempotency-Key`：
 
 ```json
 {
@@ -23,7 +23,18 @@
 ```
 
 5. 使用 Temporal Worker 推进，或逐次执行 `agent-py tick TASK_ID`。每个 tick 至多发起一次新的付费推理；前面的轮次从持久化决策恢复。首次没有匹配证据则等待 `EVIDENCE_REQUIRED`，此时可导入材料后继续。
-6. 通过现有任务产物列表下载 `model-analysis`。`investigation-loop/v1` 报告包含各轮冻结上下文、决策、停止原因和人工审阅标记；任务停在 `HUMAN_REVIEW`，不会标记业务成功。当前工作台的任务创建表单尚未提供此工作流选项，使用 API 创建。
+6. 工作台的“只读调查过程”展示每轮查询、假设、证据来源/版本/行号、模型引用及费用。通过任务产物列表下载 `model-analysis`；`investigation-loop/v1` 报告包含冻结上下文、决策、停止原因和人工审阅标记。任务停在 `HUMAN_REVIEW`，不会标记业务成功。
+
+本地 demo 操作身份也可通过 CLI 创建与查看（生产使用认证 API）：
+
+```bash
+agent-py investigation-create 'Investigate queue capacity regression' --kind incident --request-key investigation-demo-1
+agent-py investigation-status TASK_ID
+```
+
+`GET /api/v1/tasks/{id}/investigation` 与 status 命令只读取冻结记录，不采集证据、不推进任务、不调用模型。接口返回 `Cache-Control: no-store`。每轮状态区分 `READY`、`IN_FLIGHT`、`DECIDED`、`RESPONSE_UNKNOWN` 与无证据/无增量停止。`IN_FLIGHT` 仅说明已持久化派发意图，不证明 Worker 仍存活；`RESPONSE_UNKNOWN` 表示已结算但没有有效决策，不能盲目重试。
+
+工作台串行轮询状态，失败或证据失效时清除已显示内容；切换凭证/任务会取消旧请求并忽略迟到响应。撤权不是主动推送的逐文档通知，正常情况在下一次轮询检查，阻塞请求会在 10 秒后清空并重试。
 
 ## 调查规则
 
@@ -49,4 +60,6 @@
 
 每次推理前后以及报告发布前，重新校验所有已使用轮次的证据，而不只是当前轮次。撤权、正文或版本变化、有效期失效会阻止继续；需要修复授权或创建新任务，不静默替换旧证据。每个执行边界继续检查 deadline、取消、接管、租户紧急停止、Worker 租约和 AgentRelease。SQL 表使用复合租户外键，PostgreSQL 同时启用 FORCE RLS。
 
-本轮没有提供完整的通用 Plan DAG、语义级依赖失效或跨任务自动重规划，也没有新增外部写入能力。已下载的报告不能被远程撤回；现有产物下载按任务权限授权，不是逐文档的动态脱敏系统。
+调查状态和此工作流的 `model-analysis` 下载还会按读取者当前权限复核全部冻结证据；operator 角色不绕过文档 ACL。任一依赖失效则整份拒绝，不部分返回模型结论。已下载的报告不能被远程撤回。此规则不扩展到其他工作流的历史产物，也不是动态脱敏系统。
+
+通用 Plan DAG、语义级依赖失效、跨任务自动重规划及真实模型质量验收仍待完成。
