@@ -76,6 +76,18 @@ class Service:
         self.reconcile_cursors: dict[str, str] = {}
 
     def create_task(self, p: Principal, contract: TaskContract, key: str) -> Task:
+        from agent_py.trace_context import enabled
+
+        if not enabled(self, p.tenant_id):
+            return self._create_task(p, contract, key)
+        with self.telemetry.span(
+            "task.accepted", new_root=True, **{"tenant.id": p.tenant_id}
+        ) as span:
+            task = self._create_task(p, contract, key)
+            span.set_attribute("task.id", task.id)
+            return task
+
+    def _create_task(self, p: Principal, contract: TaskContract, key: str) -> Task:
         if contract.workflow == "investigation_loop" and self.settings.execution_mode != "live":
             raise DomainError("INVESTIGATION_MODE", "Investigation loop requires live mode", 409)
         if contract.workflow == "repair_candidate" and self.settings.execution_mode != "live":
@@ -133,6 +145,9 @@ class Service:
                 s.add(task)
                 s.flush()
                 s.add(Outbox(tenant_id=p.tenant_id, task_id=task.id))
+                from agent_py.trace_context import record_origin
+
+                record_origin(self, s, task)
                 emit(s, task, "task.created", {"kind": contract.kind, "release": self.release.id})
                 return task
         except IntegrityError:

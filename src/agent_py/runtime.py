@@ -52,9 +52,20 @@ class Activities:
         started = time.monotonic()
         abandoned = False
         try:
+            from agent_py.trace_context import enabled, read_links, record_segment
+
+            links = await asyncio.to_thread(
+                read_links, self.service, tenant, task_id, identity.get("trace_context")
+            )
             with self.service.telemetry.span(
-                "worker.tick", **{"task.id": task_id, "tenant.id": tenant}
+                "worker.tick",
+                links=links,
+                new_root=enabled(self.service, tenant),
+                **{"task.id": task_id, "tenant.id": tenant},
             ) as span:
+                await asyncio.to_thread(
+                    record_segment, self.service, tenant, task_id, span.get_span_context()
+                )
                 result = await self._tick(identity)
                 outcome = (
                     "done"
@@ -130,15 +141,30 @@ async def dispatch_once(service: Service, client, tenant: str):
             .limit(20)
         ).all()
     for row in rows:
-        try:
-            await client.start_workflow(
-                AgentWorkflow.run,
-                {"tenant": tenant, "task_id": row.task_id},
-                id=f"agent:{tenant}:{row.task_id}",
-                task_queue=service.release.task_queue,
+        from agent_py.trace_context import read_links, record_segment
+
+        links = await asyncio.to_thread(read_links, service, tenant, row.task_id)
+        with service.telemetry.span(
+            "task.dispatch",
+            links=links,
+            new_root=True,
+            **{"tenant.id": tenant, "task.id": row.task_id},
+        ) as span:
+            carrier = await asyncio.to_thread(
+                record_segment, service, tenant, row.task_id, span.get_span_context(), dispatch=True
             )
-        except WorkflowAlreadyStartedError:
-            pass
+            identity = {"tenant": tenant, "task_id": row.task_id}
+            if carrier is not None:
+                identity["trace_context"] = carrier
+            try:
+                await client.start_workflow(
+                    AgentWorkflow.run,
+                    identity,
+                    id=f"agent:{tenant}:{row.task_id}",
+                    task_queue=service.release.task_queue,
+                )
+            except WorkflowAlreadyStartedError:
+                pass
         with service.db.session(tenant) as s:
             tenant_get(s, Outbox, row.id, tenant).delivered = True
 

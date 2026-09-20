@@ -104,7 +104,22 @@ def test_postgres_migrations_rls_and_concurrent_budget(tmp_path, monkeypatch):
                     "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO agent_test_app"
                 )
             )
-        from agent_py.db import InvestigationRound
+        from agent_py.db import InvestigationRound, TaskTrace
+
+        for tenant in ("one", "two"):
+            with appdb.session(tenant) as s:
+                s.add(TaskTrace(tenant_id=tenant, task_id=graphs[tenant]["tasks"]))
+        with appdb.session("one") as s:
+            assert s.execute(text("SELECT tenant_id FROM task_traces")).scalars().all() == ["one"]
+        with appdb.engine.connect() as c:
+            assert c.scalar(text("SELECT count(*) FROM task_traces")) == 0
+        with pytest.raises(IntegrityError):
+            with engine.begin() as c:
+                c.execute(
+                    TaskTrace.__table__.insert().values(
+                        tenant_id="one", task_id=graphs["two"]["tasks"]
+                    )
+                )
 
         for tenant in ("one", "two"):
             with appdb.session(tenant) as s:

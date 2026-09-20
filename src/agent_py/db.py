@@ -73,6 +73,18 @@ class Task(Record):
     version: Mapped[int] = mapped_column(Integer, default=1)
 
 
+class TaskTrace(Record):
+    __tablename__ = "task_traces"
+    __table_args__ = (
+        tenant_reference("task_traces", "task_id", "tasks"),
+        UniqueConstraint("tenant_id", "task_id"),
+    )
+    task_id: Mapped[str] = mapped_column(String(36))
+    origin: Mapped[str | None] = mapped_column(String(55), nullable=True)
+    dispatch: Mapped[str | None] = mapped_column(String(55), nullable=True)
+    latest: Mapped[str | None] = mapped_column(String(55), nullable=True)
+
+
 class Operation(Record):
     __tablename__ = "operations"
     __table_args__ = (

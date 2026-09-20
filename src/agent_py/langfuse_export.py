@@ -13,7 +13,7 @@ from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 
-NAMES = {"worker.tick", "model.generation", "model.result_reused"}
+NAMES = {"task.accepted", "task.dispatch", "worker.tick", "model.generation", "model.result_reused"}
 DIGESTS = {"request_digest", "prompt_digest", "context_digest", "release_digest"}
 NUMBERS = {"reserved_micro_usd", "input_price", "output_price"}
 
@@ -115,12 +115,21 @@ class LangfuseProcessor(SpanProcessor):
                 "langfuse.environment": self.settings.environment,
             }
         )
-        # Rebuild rather than copy: discard events, links, status text, resource attributes,
+        from agent_py.trace_context import link, pack
+
+        links = []
+        if span.name in {"task.dispatch", "worker.tick"}:
+            for item in span.links[:3]:
+                role = (item.attributes or {}).get("agent.link")
+                if safe := link(pack(item.context), role):
+                    links.append(safe)
+        # Rebuild rather than copy: discard events, unrecognized links, status text, resource attributes,
         # baggage, user input/output and every unrecognized third-party field.
         return ReadableSpan(
             name=span.name,
             context=span.context,
             parent=span.parent,
+            links=links,
             resource=Resource({"service.name": "agent-py"}),
             attributes=encoded,
             start_time=span.start_time,

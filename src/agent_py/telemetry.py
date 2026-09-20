@@ -6,6 +6,7 @@ import os
 from contextlib import contextmanager
 from logging.handlers import RotatingFileHandler
 
+from opentelemetry.context import Context
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter, SpanExportResult
 from prometheus_client import CollectorRegistry, Counter, Histogram
@@ -101,9 +102,14 @@ class Telemetry:
         self.tracer = self.provider.get_tracer("agent-py", "0.1.0")
 
     @contextmanager
-    def span(self, name, **attributes):
+    def span(self, name, *, links=(), new_root=False, **attributes):
         with self.tracer.start_as_current_span(
-            name, attributes=attributes, record_exception=False, set_status_on_exception=False
+            name,
+            attributes=attributes,
+            links=links,
+            context=Context() if new_root else None,
+            record_exception=False,
+            set_status_on_exception=False,
         ) as span:
             try:
                 yield span

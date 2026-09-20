@@ -35,13 +35,13 @@ AGENT_LANGFUSE_FLUSH_SECONDS=3
 
 每个进程绑定一个租户/环境与一套独立 project 凭证。只有配置租户的 span 能进入该项目；其他租户仍可按业务配置执行，但其遥测被过滤。需要多租户完整观测时部署独立观测绑定的 Worker/进程，不能把多个租户复用同一 project 当作权限隔离。平台成员权限、地域和项目分配须独立配置并实际验证。
 
-tenant、task session、推理身份使用独立密钥的 HMAC-SHA256 伪名，域包含环境和租户。相同密钥/绑定下可关联重启后的执行段；密钥轮换改变伪名。当前没有持久化 trace 索引、工作台跳转或反查 API，不把伪名误称为平台 ACL。
+tenant、task session、推理身份使用独立密钥的 HMAC-SHA256 伪名，域包含环境和租户。相同密钥/绑定下可关联重启后的执行段；密钥轮换改变伪名。当前持久化任务执行段关联，但没有工作台跳转或反查 API，不把伪名误称为平台 ACL。
 
 启用仅影响观测，不改变模型请求、授权、预算或 AgentRelease 的业务运行策略。配置与密钥须单独管理；观测配置尚未纳入发布清单。日常默认仍为关闭。
 
 ## 导出与数据边界
 
-允许导出的 span 名仅有 `worker.tick`、`model.generation`、`model.result_reused`，且 instrumentation scope 必须是项目自己的 `agent-py`。应用端只添加选定字段；处理器在排队前重建干净 span，剔除其余属性、事件、links、status 文本和资源元数据。
+允许导出的 span 名仅有 `task.accepted`、`task.dispatch`、`worker.tick`、`model.generation`、`model.result_reused`，且 instrumentation scope 必须是项目自己的 `agent-py`。应用端只添加选定字段；处理器在排队前重建干净 span，剔除其余属性、事件、未允许的 links、status 文本和资源元数据。
 
 不导出任务目标、查询原文、证据正文、源代码、补丁、模型输出、异常信息、headers、原始业务 ID 或凭证。正文摘要不等于内容授权，因此首期不支持 redacted/input-output 模式。其他 exporter（包括本地 JSONL）仍执行各自白名单，不能认为 Langfuse 过滤器会替它们脱敏。
 
@@ -49,16 +49,30 @@ tenant、task session、推理身份使用独立密钥的 HMAC-SHA256 伪名，�
 
 请求 I/O timeout 默认 2 秒，关闭最多等待 3 秒后丢弃剩余队列；在途 daemon 线程可能继续至 I/O 结束。该 timeout 不是网络请求的绝对墙钟终止保证。正常 CLI 退出、API lifespan 和 Worker shutdown 关闭 provider；SIGKILL 可能丢失未导出数据，禁止重跑业务来补 trace。
 
-Prometheus 指标 `agent_langfuse_spans_total{result=...}` 包含 `queued`、`exported`、`filtered`、`dropped`、`sanitization_failed`、`export_failed`。`exported` 只表示接收端返回成功 OTLP 应答，不证明平台页面已经完整可见。没有把任务/租户 ID 放入新增指标标签。
+Prometheus 指标 `agent_langfuse_spans_total{result=...}` 包含 `queued`、`exported`、`filtered`、`dropped`、`sanitization_failed`、`export_failed`、`correlation_failed`。`exported` 只表示接收端返回成功 OTLP 应答，不证明平台页面已经完整可见。没有把任务/租户 ID 放入新增指标标签。
+
+## 跨进程执行段关联
+
+启用前运行 `alembic upgrade head`，迁移 `0012_task_traces` 新建租户隔离表。API 创建任务时，在 Task/Outbox 的同一事务中保存服务端创建的 origin；客户端的 `traceparent`、`tracestate` 和 baggage 不参与关联。幂等创建保留第一次 origin。
+
+Dispatcher 保存首次派发的 traceparent，通过 Temporal workflow/activity 参数的 `trace_context` 字段传播。丢失 start ACK 后重试沿用第一次 carrier；历史 workflow 输入没有此字段仍可运行。每次派发和 Worker tick 创建新的根 span，通过 OTel links 指向 origin、已持久化且匹配本任务的 dispatch、上一执行段，避免 span 跨越审批等待或进程生命周期。generation 仍是当前 tick 的子 span；稳定 HMAC session 将这些独立 trace 归到同一任务。
+
+数据库仅保存版本 00 的 traceparent，不保存 baggage、tracestate 或正文。复合外键阻止跨租户引用；PostgreSQL 强制 RLS。Worker 更新上一执行段指针时检查当前工作租约，失效 Worker 无权推进指针。任务创建后的关联读写失败降级并计数，不修改业务版本、幂等身份、预算或恢复决策。任务创建时的原子写入需要迁移和数据库可用；它不是独立的异步写入。
+
+导出只允许派发和 tick 的最多三个 links，属性仅保留 `agent.link=origin|dispatch|previous`。关闭开关或非配置租户不会写入关联表。启动观测前已存在的任务可在派发/执行时补充关联，但不补造 origin。该表只保存 origin、首次 dispatch 和最新 tick，完整链依赖已导出的 spans；SIGKILL 或丢弃队列可留下断链，不作为业务审计事实。
+
+本地验证覆盖真实 API 请求、Outbox ACK 丢失、多个独立 Worker 进程、租约 fencing、元数据故障降级，以及原生 Temporal 参数传递和 history replay。原生 PostgreSQL 验证迁移升降级、RLS 和跨租户外键。导出使用 MockTransport；Langfuse 平台中的 links 展示、检索和保留策略仍待真实联调。
 
 ## 验证与待办
 
 ```bash
-.venv/bin/pytest tests/test_langfuse.py -q
+.venv/bin/pytest tests/test_langfuse.py tests/test_trace_context.py -q
+env AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_trace_context.py -m integration -q
+env AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q
 ```
 
 测试使用实际锁定 SDK 的属性编码、实际 OTel span/protobuf 和 MockTransport，不需要外部凭证。覆盖线程上下文、跨租户过滤、多 exporter 数据边界、复用不重复计费、未知 usage、容量丢弃、超时关闭、平台失败/跳转/partial rejection 及 CLI 清理。Python CI 安装 langfuse extra 后执行这些测试；缺少可选 SDK 的常规环境会显式跳过此测试模块。
 
-LF-01 仍待：真实 Langfuse OTLP 联调和三类真实模型轨迹、API→Outbox→Temporal 跨进程上下文与持久化关联、检索/工具/沙盒阶段 observation、采样、完整项目权限与保留/删除策略、自托管服务/镜像摘要锁定、部署/断网/吞吐与 P95 性能验收。当前不能用这份基础代码宣称完成完整 LF-01，更不能宣称策略质量已经提高。
+LF-01 仍待：真实 Langfuse OTLP 联调和三类真实模型轨迹、检索/工具/沙盒阶段 observation、采样、完整项目权限与保留/删除策略、自托管服务/镜像摘要锁定、部署/断网/吞吐与 P95 性能验收。当前不能用这份基础代码宣称完成完整 LF-01，更不能宣称策略质量已经提高。
 
 官方依据：[SDK 与 OTel](https://langfuse.com/docs/observability/sdk/overview)、[现有 OTel 集成](https://langfuse.com/faq/all/existing-otel-setup)、[Python API 参考](https://python.reference.langfuse.com/langfuse)。实际编码以锁定 4.15.4 源码及 wire-format 测试为准。
