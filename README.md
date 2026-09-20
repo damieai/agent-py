@@ -149,3 +149,5 @@ Worker 已接入数据库共享的租户并发上限、FIFO 等待票据和过�
 可选 `release-build` / `release-check` 将源码、运行配置和重算后的评测证据绑定为发布摘要；任务和 Temporal 队列固定到该版本，配置漂移拒绝新派发。启用顺序、旧任务恢复和证明边界见[发布版本说明](docs/releases.md)。
 
 可选[发布签名与撤销](docs/release-signing.md)使用独立公钥策略和短期 Ed25519 证明；同版本续签不改变队列，撤钥或到期阻止新派发，保留取消和对账。
+
+`make browser-test` 运行 Chromium 工作台验收，连接独立临时 FastAPI/SQLite 与仿真渠道，覆盖审批、接管恢复/取消、撤权清屏、下载和凭证切换竞态。安装步骤、报告位置及边界见[浏览器测试](docs/browser-testing.md)。

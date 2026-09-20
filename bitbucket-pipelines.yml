@@ -18,13 +18,19 @@ pipelines:
           - .runtime/tests.xml
           - .runtime/gate/*.json
     - step:
-        name: Workbench build
-        image: node:24-slim
+        name: Workbench build and Chromium end-to-end
+        image: node:24-bookworm
         script:
+          - apt-get update && apt-get install -y --no-install-recommends python3-pip
+          - pip3 install --break-system-packages uv==0.12.17
+          - uv sync --extra dev --frozen --python 3.12
           - cd web
           - npm ci
           - npm test
-          - npm run build
+          - npx playwright install --with-deps chromium
+          - npm run test:e2e
+        artifacts:
+          - .runtime/browser/**
     - step:
         name: Finite TLA+ safety and negative controls
         script:

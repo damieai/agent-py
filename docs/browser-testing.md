@@ -1,0 +1,48 @@
+# 工作台浏览器验收
+
+`make browser-test` 用锁定的 Playwright 1.63.0 和 Chromium 运行真实浏览器测试。测试先构建 React 生产资源并检查应用/E2E TypeScript，再连接真实 FastAPI、独立临时 SQLite 数据库和持久化仿真渠道。测试只运行 Chromium，不能代替真实企业环境验收。
+
+## 运行
+
+需要项目 Python 环境、Node 24 和 Chromium 依赖：
+
+```bash
+uv sync --extra dev --frozen
+npm --prefix web ci
+(cd web && npx playwright install --with-deps chromium)
+make browser-test
+```
+
+Playwright 安装命令可能需要系统包管理权限。当前开发机已有匹配的 Chromium 153.0.8010.12（revision 1243），但缺少 libnspr4、libnss3、libasound2t64；本次将发行版软件包解压到 `.runtime/browser-libs/root`，没有修改系统安装，并通过仅对子进程生效的 LD_LIBRARY_PATH 完成验收。正常 CI 使用官方安装命令准备依赖。
+
+配置采用[Playwright 官方 webServer 机制](https://playwright.dev/docs/test-webserver)，服务实际绑定端口后输出就绪信号。使用固定 loopback 地址 `127.0.0.1:18765`，端口冲突即失败，禁止复用已运行服务。单 Worker、无自动重试、每项默认 30 秒、整体 120 秒上限；双审批全流程单独允许 60 秒。失败时保留截图、trace 和 HTML 报告到 `.runtime/browser/`。该目录已被 Git 忽略，Bitbucket 步骤会归档报告。
+
+## 隔离边界
+
+`scripts/serve_e2e.py` 是独立测试入口，不属于生产 API。它要求显式 E2E_FIXTURE 和随机控制密钥，清除子进程中继承的 AGENT_* 配置，不加载 .env，强制 test/simulation，临时生成 JWT 密钥。只绑定 loopback，数据与模拟远端账本位于临时目录，正常退出时清理。
+
+测试控制接口只负责创建隔离租户/授权、撤销测试 Grant，以及推进一次真实 Activities.tick。接口要求测试控制密钥，生产 `create_app` 不会安装这些路由。浏览器页面使用正常的认证 API、SSE 和下载接口；控制密钥由 Node 测试端使用，不注入页面。每个测试有独立租户，每个浏览器测试有独立 Context。
+
+这里没有启动 Temporal 服务：测试驱动 Activity 以获得可控业务进度，不伪称验证了浏览器到 Temporal 的全部网络链路。Temporal 恢复和 PostgreSQL RLS 由已有独立集成测试覆盖。没有调用模型、Docker、企业账号或真实外部写入。
+
+两个竞态测试使用 route.fetch 发出真实 HTTP 请求，再延迟浏览器收到响应；没有伪造业务 JSON。迟到创建测试观察一个完整轮询周期，迟到下载测试在响应完成后留出短观察窗口，这些显式等待用于否定性竞态断言，其余步骤使用请求、DOM 状态和下载事件等待。
+
+## 七项验收与本轮修复
+
+| 场景 | 浏览器与后端断言 |
+| --- | --- |
+| 修复审批闭环 | 创建任务；开发者批准被 API 拒绝；切换 reviewer 完成 merge/deploy 两次批准；SUCCESS、SSE 终止事件和审计下载一致 |
+| 接管与取消 | 接管后 Activity 等待；携带版本恢复；取消后得到 CANCELLED，未创建副作用操作 |
+| 撤权 | 展示授权证据与时间线；撤销 Grant 后页面清空凭证、任务、证据和时间线 |
+| 清空凭证 | 直接编辑输入框清空也立即移除任务列表；localStorage/sessionStorage 不保存凭证，刷新页面不恢复凭证 |
+| 迟到创建 | 请求已在真实数据库提交后更换到另一租户凭证；旧响应不能自动选择任务或触发旧详情请求 |
+| 迟到审计下载 | 清除后重新输入**相同凭证**，旧响应也不得启动下载，验证隔离依赖页面身份代次而非仅比较 Token 字符串 |
+| 不完整凭证 | 无效或尚未输入完成的凭证仍可编辑；换成有效凭证后正常创建任务 |
+
+旧构建中，清空凭证用例实际失败：任务列表仍保留一个任务，等待 10 秒后仍未清除。修复引入页面身份代次，凭证编辑、清除和已确认会话的授权失效统一清除列表、选择、详情、运行概览及旧错误。异步请求、修改操作和下载只允许更新原身份代次；旧 SSE 回调也不能清空新身份。初次输入尚未有效的 Token 不自动擦除，避免用户无法逐步输入凭证。
+
+丢弃响应只控制页面状态，不能撤回服务器已经接收的创建/审批操作。重新登录后应通过任务记录核实实际结果；不要据此声称 HTTP 请求被取消或实现了前端网络级撤销。已经下载到用户设备的文件也无法由清屏收回。
+
+## 剩余范围
+
+Bitbucket 配置已包含浏览器依赖安装、生产构建、类型检查和七项 E2E，但远端流水线尚未运行。尚未覆盖 Firefox/WebKit、移动布局、完整无障碍审计、真实模型候选修复 UI、生产身份提供方以及真实企业写闭环。失败 trace 可能包含本次临时测试 Token 和请求正文，应按测试报告管理；不要把本套控制接口接入生产数据。

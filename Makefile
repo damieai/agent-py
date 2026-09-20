@@ -28,3 +28,7 @@ frontend:
 .PHONY: formal-check
 formal-check:
 	.venv/bin/python scripts/check_formal.py
+
+.PHONY: browser-test
+browser-test:
+	npm --prefix web run test:e2e
