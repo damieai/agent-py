@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     release_manifest: Path | None = None
     release_expected_id: str = Field(default="", pattern=r"^(|sha256:[a-f0-9]{64})$")
     release_root: Path = Path(".")
+    release_attestation: Path | None = None
+    release_trust_store: Path | None = None
+    release_audience: str = Field(default="", max_length=160)
     model_id: str = ""
     collection_manifest: Path | None = None
     sandbox_image: str = ""
@@ -57,6 +60,15 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production(self):
+        signature_options = (
+            self.release_attestation,
+            self.release_trust_store,
+            self.release_audience,
+        )
+        if any(signature_options) and (not all(signature_options) or self.release_manifest is None):
+            raise ValueError(
+                "Release signature requires attestation, trust store, audience and manifest"
+            )
         if bool(self.release_manifest) != bool(self.release_expected_id):
             raise ValueError(
                 "Release manifest and independent expected ID must be configured together"

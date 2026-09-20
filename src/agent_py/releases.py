@@ -154,7 +154,10 @@ class ReleaseGuard:
         self.settings = settings
         self.id = "agent-v1"
         self.release = None
+        self.signature_required = bool(settings.release_attestation)
+        self.signature_scope = (settings.release_audience, settings.environment)
         if settings.release_manifest is None:
+            self.check()
             return
         try:
             self.release = AgentRelease.model_validate(
@@ -175,6 +178,28 @@ class ReleaseGuard:
             fail("Release is missing, malformed or has invalid local inputs")
 
     def check(self, task_release=None):
+        from agent_py.release_signing import verify_release_attestation
+
+        signature_options = (
+            self.settings.release_attestation,
+            self.settings.release_trust_store,
+            self.settings.release_audience,
+        )
+        if self.signature_required:
+            if (
+                not all(signature_options)
+                or (self.settings.release_audience, self.settings.environment)
+                != self.signature_scope
+            ):
+                fail("Release signature configuration changed; restart the process")
+            verify_release_attestation(
+                self.settings.release_attestation,
+                self.settings.release_trust_store,
+                self.id,
+                *self.signature_scope,
+            )
+        elif any(signature_options):
+            fail("Release signature configuration changed; restart the process")
         if task_release is not None and task_release != self.id:
             fail("Task belongs to another release; use its matching Worker")
         if self.release is None:

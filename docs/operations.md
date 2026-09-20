@@ -51,3 +51,5 @@ API 返回 `X-Trace-ID`，同一 span 中写入的任务事件携带 trace ID。
 企业证据读取增加共享熔断、活动读取名额/上限以及容量拒绝指标，已加入告警及 Grafana 模板；租户级数据库 gauge 继续按 max 聚合。具体恢复命令和界限见[依赖故障治理](dependency-resilience.md)。
 
 启用发布固定后，Outbox 按发布摘要分流。积压时同时核对任务 release_id、对应 Dispatcher/Worker 的独立 pin 和专属队列；禁止修改任务发布 ID 强行迁移。启用前需要先升级或停止不识别版本的旧 Dispatcher，详见[发布操作步骤](releases.md)。
+
+启用发布签名后，readiness 503 或 RELEASE_SIGNATURE_INVALID 应检查签名到期、公钥有效期、撤销状态、audience/运行环境和各副本信任文件分发。先续签/恢复可信策略，再恢复原 Outbox；不要换动作身份重发。轮换步骤与无法强制中断在途请求的边界见[发布签名说明](release-signing.md)。

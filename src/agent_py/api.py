@@ -180,6 +180,7 @@ def create_app(
         return {
             "status": "ok",
             "release_id": service.release.id,
+            "release_signature_required": service.release.signature_required,
             "mode": settings.execution_mode,
             "repair_enabled": settings.allow_candidate_execution and settings.allow_model_api,
             "audit_signing_configured": settings.audit_signing_manifest is not None,

@@ -539,6 +539,69 @@ def release_check(manifest: Path, expected_id: str, root: Path = Path(".")):
         raise typer.Exit(1) from None
     typer.echo(
         json.dumps(
-            {"release_id": guard.id, "task_queue": guard.task_queue, "production_ready": False}
+            {
+                "release_id": guard.id,
+                "task_queue": guard.task_queue,
+                "signature_required": guard.signature_required,
+                "production_ready": False,
+            }
         )
     )
+
+
+@app.command()
+def release_keygen(
+    directory: Path, key_id: str, audience: str, environment: str = "test", days: int = 90
+):
+    """Generate operator-owned release signing material; distribute public trust separately."""
+    from agent_py.release_signing import generate_release_keys
+
+    try:
+        result = generate_release_keys(directory, key_id, audience, environment, days)
+    except (OSError, ValueError, TypeError):
+        typer.echo("Release key generation failed: invalid scope or existing output", err=True)
+        raise typer.Exit(1) from None
+    typer.echo(json.dumps(result))
+
+
+@app.command()
+def release_sign(
+    manifest: Path,
+    signer: Path,
+    expected_id: str,
+    output: Path,
+    audience: str,
+    environment: str = "test",
+    lifetime: int = 3600,
+):
+    """Sign a bounded release attestation; neither publish nor deploy the release."""
+    from agent_py.domain import DomainError
+    from agent_py.release_signing import local_json, sign_release, write_private_json
+    from agent_py.releases import MAX_FILE, AgentRelease, release_id
+
+    try:
+        release = AgentRelease.model_validate(local_json(manifest, MAX_FILE))
+        if release_id(release) != expected_id:
+            raise ValueError("Independent release ID mismatch")
+        signed = sign_release(release, signer, audience, environment, lifetime)
+        write_private_json(output, signed)
+    except (DomainError, OSError, ValueError, TypeError, RecursionError):
+        typer.echo("Release signing failed: release, scope, key or output denied", err=True)
+        raise typer.Exit(1) from None
+    typer.echo(json.dumps({"release_id": expected_id, "production_ready": False}))
+
+
+@app.command()
+def release_verify(
+    attestation: Path, trust: Path, expected_id: str, audience: str, environment: str = "test"
+):
+    """Verify only the detached signature against independent scope/pin; use release-check too."""
+    from agent_py.domain import DomainError
+    from agent_py.release_signing import verify_release_attestation
+
+    try:
+        result = verify_release_attestation(attestation, trust, expected_id, audience, environment)
+    except DomainError as exc:
+        typer.echo(f"{exc.code}: {exc.message}", err=True)
+        raise typer.Exit(1) from None
+    typer.echo(json.dumps(result))
