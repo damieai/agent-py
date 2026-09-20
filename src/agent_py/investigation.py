@@ -36,6 +36,10 @@ class InvestigationHarness:
             return {"done": True, "result": "CANCELLED"}
         if not service.settings.allow_model_api:
             raise DomainError("MODEL_API_DISABLED", "Explicit paid inference opt-in required", 403)
+        if task.contract.get("workflow") == "investigation_loop":
+            from agent_py.investigation_loop import BoundedInvestigation
+
+            return BoundedInvestigation(service, self.gateway).tick(task)
         contract = task.contract
         principal = Principal(
             tenant_id=tenant,

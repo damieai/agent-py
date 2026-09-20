@@ -104,6 +104,36 @@ def test_postgres_migrations_rls_and_concurrent_budget(tmp_path, monkeypatch):
                     "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO agent_test_app"
                 )
             )
+        from agent_py.db import InvestigationRound
+
+        for tenant in ("one", "two"):
+            with appdb.session(tenant) as s:
+                s.add(
+                    InvestigationRound(
+                        tenant_id=tenant,
+                        task_id=graphs[tenant]["tasks"],
+                        ordinal=1,
+                        query="fixture",
+                        context={},
+                    )
+                )
+        with appdb.session("one") as s:
+            assert s.execute(
+                text("SELECT tenant_id FROM investigation_rounds")
+            ).scalars().all() == ["one"]
+        with appdb.engine.connect() as c:
+            assert c.scalar(text("SELECT count(*) FROM investigation_rounds")) == 0
+        with pytest.raises(IntegrityError):
+            with appdb.session("one") as s:
+                s.add(
+                    InvestigationRound(
+                        tenant_id="one",
+                        task_id=graphs["two"]["tasks"],
+                        ordinal=2,
+                        query="cross tenant",
+                        context={},
+                    )
+                )
         # Even the migration administrator cannot commit an invalid reference.
         with pytest.raises(IntegrityError):
             with engine.begin() as c:

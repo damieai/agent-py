@@ -99,6 +99,8 @@ agent-py analyze TASK_ID INPUT_MICRO_USD_PER_TOKEN OUTPUT_MICRO_USD_PER_TOKEN --
 
 新导入与采集的证据绑定任务；未变化的采集内容按摘要去重。旧版本未绑定任务的文档仍按原项目 ACL 共享，迁移不会自动猜测其归属。采集省略构建参数及 Pod 配置，但工单与 PR 正文仍可能包含业务敏感信息，需要按企业出站规则选择来源。真实账号联调尚未完成。
 
+需要多轮只读调查时，通过 API 显式选择 `workflow=investigation_loop`：模型可提出下一轮授权证据检索查询，最多三轮；每轮冻结输入并恢复已结算决策，重复查询、无证据或无增量时停止，最终交由人工审阅。配置、请求示例和恢复边界见[有界调查说明](docs/investigation-loop.md)。
+
 ## 有界候选修复
 
 `workflow=repair_candidate` 将已授权的本地源码、任务证据、模型补丁、容器验证和人工审阅连接起来。失败候选可按清单上限再次生成（最多 3 次），每次回到同一冻结基线。补丁和验证结果持久化，工作台可查看每轮状态和源码差异。通过回归后停在 `CANDIDATE_READY_FOR_REVIEW`，没有自动推送、合并或部署。

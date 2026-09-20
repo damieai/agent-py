@@ -176,6 +176,18 @@ class Reservation(Record):
     day: Mapped[str] = mapped_column(String(10), default=lambda: now().date().isoformat())
 
 
+class InvestigationRound(Record):
+    __tablename__ = "investigation_rounds"
+    __table_args__ = (
+        tenant_reference("investigation_rounds", "task_id", "tasks"),
+        UniqueConstraint("tenant_id", "task_id", "ordinal"),
+    )
+    task_id: Mapped[str] = mapped_column(String(36))
+    ordinal: Mapped[int] = mapped_column(Integer)
+    query: Mapped[str] = mapped_column(String(8000))
+    context: Mapped[dict] = mapped_column(JSON)
+
+
 class DailyBudget(Record):
     __tablename__ = "daily_budgets"
     __table_args__ = (UniqueConstraint("tenant_id", "day"),)

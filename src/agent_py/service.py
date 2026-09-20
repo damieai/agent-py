@@ -76,6 +76,8 @@ class Service:
         self.reconcile_cursors: dict[str, str] = {}
 
     def create_task(self, p: Principal, contract: TaskContract, key: str) -> Task:
+        if contract.workflow == "investigation_loop" and self.settings.execution_mode != "live":
+            raise DomainError("INVESTIGATION_MODE", "Investigation loop requires live mode", 409)
         if contract.workflow == "repair_candidate" and self.settings.execution_mode != "live":
             raise DomainError(
                 "REPAIR_MODE", "Candidate repair requires live mode and explicit opt-ins", 409

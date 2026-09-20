@@ -28,7 +28,7 @@ ReleaseId = Annotated[str, Field(pattern=r"^(agent-v1|sha256:[a-f0-9]{64})$")]
 
 class TaskContract(Contract):
     kind: Literal["repair", "incident"]
-    workflow: Literal["investigate", "repair_candidate"] = "investigate"
+    workflow: Literal["investigate", "investigation_loop", "repair_candidate"] = "investigate"
     goal: str = Field(min_length=5, max_length=8000)
     project: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
     environment: Literal["lab", "staging", "production"] = "lab"
@@ -76,6 +76,22 @@ class ModelDecision(Contract):
     def check_stop(self):
         if self.stop and self.next_action:
             raise ValueError("A stopping decision cannot request an action")
+        return self
+
+
+class InvestigationDecision(Contract):
+    summary: str = Field(min_length=1, max_length=4000)
+    hypotheses: list[Annotated[str, Field(min_length=1, max_length=1000)]] = Field(max_length=10)
+    evidence_ids: list[str] = Field(min_length=1, max_length=100)
+    next_query: Annotated[str, Field(min_length=3, max_length=500)] | None = None
+    stop: bool
+
+    @model_validator(mode="after")
+    def next_step(self):
+        if self.stop == (self.next_query is not None):
+            raise ValueError("Continue with one retrieval query or stop without a query")
+        if self.next_query is not None and not self.next_query.strip():
+            raise ValueError("Retrieval query must not be blank")
         return self
 
 
