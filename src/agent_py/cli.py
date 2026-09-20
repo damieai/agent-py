@@ -1,5 +1,6 @@
 import asyncio
 import json
+from contextvars import ContextVar
 from pathlib import Path
 
 import typer
@@ -9,10 +10,25 @@ from agent_py.config import get_settings
 from agent_py.db import Approval, Grant, Policy
 from agent_py.domain import Principal, TaskContract
 from agent_py.harness import SimulationHarness
-from agent_py.runtime import build_service, serve_dispatcher, serve_worker
+from agent_py.runtime import build_service as runtime_build_service
+from agent_py.runtime import serve_dispatcher, serve_worker
 from agent_py.security import issue_dev_token
 
 app = typer.Typer(no_args_is_help=True)
+_cli_context = ContextVar("agent_cli_context", default=None)
+
+
+@app.callback()
+def command_context(ctx: typer.Context):
+    token = _cli_context.set(ctx)
+    ctx.call_on_close(lambda: _cli_context.reset(token))
+
+
+def build_service(settings):
+    service = runtime_build_service(settings)
+    if context := _cli_context.get():
+        context.call_on_close(service.telemetry.close)
+    return service
 
 
 def principal(tenant="demo", subject="developer"):

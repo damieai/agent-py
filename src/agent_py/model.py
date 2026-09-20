@@ -174,6 +174,17 @@ class AnthropicGateway:
         if reservation.decision is not None:
             candidate = schema.model_validate(reservation.decision)
             validate(candidate)
+            with self.service.telemetry.span(
+                "model.result_reused",
+                **{
+                    "tenant.id": tenant,
+                    "task.id": task_id,
+                    "model.call_key": call_key,
+                    "model.outcome": "result_reused",
+                    "model.request_digest": digest(payload),
+                },
+            ):
+                pass
             return candidate
         if reservation.actual is not None:
             raise DomainError(
@@ -182,46 +193,74 @@ class AnthropicGateway:
             )
         actual, decision = maximum, None
         self.service.claim_inference(tenant, reservation.id)
-        try:
-            with httpx.Client(timeout=90, transport=self.transport) as client:
-                with client.stream(
-                    "POST",
-                    "https://api.anthropic.com/v1/messages",
-                    json=payload,
-                    headers={
-                        "x-api-key": self.settings.model_api_key.get_secret_value(),
-                        "anthropic-version": "2023-06-01",
-                    },
-                ) as response:
-                    response.raise_for_status()
-                    raw = bytearray()
-                    for chunk in response.iter_bytes():
-                        raw.extend(chunk)
-                        if len(raw) > 2_000_000:
-                            raise DomainError(
-                                "MODEL_OUTPUT_LIMIT", "Model response exceeds 2 MB", 502
-                            )
-                    body = json.loads(raw)
-            usage = body["usage"]
-            if any(
-                type(usage.get(k)) is not int or usage[k] < 0
-                for k in ("input_tokens", "output_tokens")
-            ):
-                raise DomainError("MODEL_USAGE", "Provider returned invalid token usage", 502)
-            actual = (
-                usage["input_tokens"] * self.input_price
-                + usage["output_tokens"] * self.output_price
-            )
-            if body.get("stop_reason") != "tool_use":
-                raise DomainError("MODEL_INCOMPLETE", "Model output was refused or truncated", 502)
-            calls = [c for c in body["content"] if c["type"] == "tool_use" and c["name"] == name]
-            if len(calls) != 1:
-                raise DomainError("MODEL_SCHEMA", "Expected exactly one decision", 502)
-            candidate = schema.model_validate(calls[0]["input"])
-            validate(candidate)
-            decision = candidate
-            return decision
-        finally:
-            self.service.settle(
-                tenant, reservation.id, actual, decision.model_dump() if decision else None
-            )
+        with self.service.telemetry.span(
+            "model.generation",
+            **{
+                "tenant.id": tenant,
+                "task.id": task_id,
+                "model.call_key": call_key,
+                "model.name": self.settings.model_id,
+                "model.workflow": name,
+                "model.request_digest": digest(payload),
+                "model.prompt_digest": digest({"instruction": instruction, "tool": tool}),
+                "model.context_digest": digest(context),
+                "model.release_digest": digest(self.service.release.id),
+                "model.reserved_micro_usd": maximum,
+                "model.input_price": self.input_price,
+                "model.output_price": self.output_price,
+                "model.outcome": "response_unknown",
+            },
+        ) as observation:
+            try:
+                with httpx.Client(timeout=90, transport=self.transport) as client:
+                    with client.stream(
+                        "POST",
+                        "https://api.anthropic.com/v1/messages",
+                        json=payload,
+                        headers={
+                            "x-api-key": self.settings.model_api_key.get_secret_value(),
+                            "anthropic-version": "2023-06-01",
+                        },
+                    ) as response:
+                        response.raise_for_status()
+                        raw = bytearray()
+                        for chunk in response.iter_bytes():
+                            raw.extend(chunk)
+                            if len(raw) > 2_000_000:
+                                raise DomainError(
+                                    "MODEL_OUTPUT_LIMIT", "Model response exceeds 2 MB", 502
+                                )
+                        body = json.loads(raw)
+                usage = body["usage"]
+                if any(
+                    type(usage.get(k)) is not int or usage[k] < 0
+                    for k in ("input_tokens", "output_tokens")
+                ):
+                    raise DomainError("MODEL_USAGE", "Provider returned invalid token usage", 502)
+                observation.set_attribute("model.input_tokens", usage["input_tokens"])
+                observation.set_attribute("model.output_tokens", usage["output_tokens"])
+                observation.set_attribute("model.outcome", "invalid_response")
+                actual = (
+                    usage["input_tokens"] * self.input_price
+                    + usage["output_tokens"] * self.output_price
+                )
+                if body.get("stop_reason") != "tool_use":
+                    raise DomainError(
+                        "MODEL_INCOMPLETE", "Model output was refused or truncated", 502
+                    )
+                calls = [
+                    c for c in body["content"] if c["type"] == "tool_use" and c["name"] == name
+                ]
+                if len(calls) != 1:
+                    raise DomainError("MODEL_SCHEMA", "Expected exactly one decision", 502)
+                candidate = schema.model_validate(calls[0]["input"])
+                validate(candidate)
+                decision = candidate
+                observation.set_attribute("model.outcome", "validated")
+                if hasattr(candidate, "stop"):
+                    observation.set_attribute("model.stop", candidate.stop)
+                return decision
+            finally:
+                self.service.settle(
+                    tenant, reservation.id, actual, decision.model_dump() if decision else None
+                )

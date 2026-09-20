@@ -16,7 +16,7 @@ pipelines:
         name: Python contract and fault tests
         script:
           - pip install uv==0.12.17
-          - uv sync --extra dev --frozen
+          - uv sync --extra dev --extra langfuse --frozen
           - .venv/bin/ruff check .
           - .venv/bin/ruff format --check .
           - mkdir -p .runtime

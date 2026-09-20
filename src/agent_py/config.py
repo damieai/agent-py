@@ -52,6 +52,15 @@ class Settings(BaseSettings):
     metrics_secret: SecretStr = SecretStr("")
     monitoring_tenants: list[str] = Field(default_factory=list, max_length=100)
     trace_file: Path | None = None
+    langfuse_enabled: bool = False
+    langfuse_base_url: str = ""
+    langfuse_tenant: str = ""
+    langfuse_public_key: SecretStr = SecretStr("")
+    langfuse_secret_key: SecretStr = SecretStr("")
+    langfuse_pseudonym_key: SecretStr = SecretStr("")
+    langfuse_queue_size: int = Field(default=256, ge=1, le=4096)
+    langfuse_timeout_seconds: float = Field(default=2, gt=0, le=10)
+    langfuse_flush_seconds: float = Field(default=3, ge=0, le=10)
     audit_signing_manifest: Path | None = None
     context_strategy: Literal["lexical", "bm25_rrf"] = "lexical"
     worker_metrics_enabled: bool = False
@@ -60,6 +69,38 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production(self):
+        if self.langfuse_enabled:
+            from urllib.parse import urlsplit
+
+            target = urlsplit(self.langfuse_base_url)
+            local = target.hostname in {"localhost", "127.0.0.1", "::1"}
+            if (
+                not target.hostname
+                or target.username
+                or target.password
+                or target.query
+                or target.fragment
+                or target.path not in {"", "/"}
+                or not (
+                    target.scheme == "https"
+                    or (target.scheme == "http" and local and self.environment != "production")
+                )
+            ):
+                raise ValueError(
+                    "Langfuse requires an HTTPS origin; local HTTP is development-only"
+                )
+            if not all(
+                (
+                    self.langfuse_tenant,
+                    self.langfuse_public_key.get_secret_value(),
+                    self.langfuse_secret_key.get_secret_value(),
+                )
+            ):
+                raise ValueError("Langfuse requires an explicit tenant and project credentials")
+            if len(self.langfuse_pseudonym_key.get_secret_value()) < 32:
+                raise ValueError(
+                    "Langfuse requires an independent pseudonym key of at least 32 characters"
+                )
         signature_options = (
             self.release_attestation,
             self.release_trust_store,

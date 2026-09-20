@@ -82,6 +82,16 @@ class Telemetry:
             "agent_worker_tick_duration_seconds", "Worker tick wall time", registry=self.registry
         )
         self.provider = TracerProvider(shutdown_on_exit=False)
+        self.langfuse_events = Counter(
+            "agent_langfuse_spans_total",
+            "Langfuse metadata export outcomes",
+            ["result"],
+            registry=self.registry,
+        )
+        if settings.langfuse_enabled:
+            from agent_py.langfuse_export import LangfuseProcessor
+
+            self.provider.add_span_processor(LangfuseProcessor(settings, self.langfuse_events))
         if settings.trace_file:
             from agent_py.db import uid
 

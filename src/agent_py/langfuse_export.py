@@ -1,0 +1,217 @@
+"""Opt-in metadata-only Langfuse OTLP adapter; no global instrumentation or business retries."""
+
+import hashlib
+import hmac
+import json
+import queue
+import re
+import threading
+import time
+
+import httpx
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
+from opentelemetry.sdk.util.instrumentation import InstrumentationScope
+
+NAMES = {"worker.tick", "model.generation", "model.result_reused"}
+DIGESTS = {"request_digest", "prompt_digest", "context_digest", "release_digest"}
+NUMBERS = {"reserved_micro_usd", "input_price", "output_price"}
+
+
+class LangfuseProcessor(SpanProcessor):
+    def __init__(self, settings, counter, transport=None):
+        # Import the optional, pinned SDK only when explicitly enabled. This private encoding
+        # API is isolated here and covered by wire-format tests; no SDK client is auto-created.
+        from langfuse._client.attributes import create_generation_attributes, create_span_attributes
+        from opentelemetry.exporter.otlp.proto.common.trace_encoder import encode_spans
+        from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
+            ExportTraceServiceResponse,
+        )
+
+        self.encode_generation = create_generation_attributes
+        self.encode_span = create_span_attributes
+        self.encode_spans = encode_spans
+        self.response_type = ExportTraceServiceResponse
+        self.settings, self.counter = settings, counter
+        self.pending = queue.Queue(maxsize=settings.langfuse_queue_size)
+        self.lock = threading.Lock()
+        self.stopping = threading.Event()
+        self.active = False
+        self.client = httpx.Client(
+            timeout=settings.langfuse_timeout_seconds,
+            transport=transport,
+            follow_redirects=False,
+            trust_env=False,
+        )
+        self.thread = threading.Thread(target=self._run, name="agent-langfuse", daemon=True)
+        self.thread.start()
+
+    def pseudonym(self, tenant, category, identifier):
+        message = json.dumps([self.settings.environment, tenant, category, identifier]).encode()
+        return hmac.new(
+            self.settings.langfuse_pseudonym_key.get_secret_value().encode(),
+            message,
+            hashlib.sha256,
+        ).hexdigest()
+
+    def sanitize(self, span):
+        attrs = span.attributes or {}
+        tenant, task = attrs.get("tenant.id"), attrs.get("task.id")
+        if (
+            span.name not in NAMES
+            or tenant != self.settings.langfuse_tenant
+            or not isinstance(task, str)
+            or len(task) > 160
+            or not span.instrumentation_scope
+            or span.instrumentation_scope.name != "agent-py"
+        ):
+            return None
+        metadata = {"tenant": self.pseudonym(tenant, "tenant", tenant)}
+        for field in DIGESTS:
+            value = attrs.get("model." + field)
+            if isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value):
+                metadata[field] = value
+        for field in NUMBERS:
+            value = attrs.get("model." + field)
+            if type(value) is int and 0 <= value <= 10**12:
+                metadata[field] = value
+        call_key = attrs.get("model.call_key")
+        if isinstance(call_key, str) and len(call_key) <= 160:
+            metadata["inference_id"] = self.pseudonym(tenant, "inference", task + ":" + call_key)
+        outcome = attrs.get("model.outcome")
+        if outcome in {"validated", "invalid_response", "response_unknown", "result_reused"}:
+            metadata["outcome"] = outcome
+        stop = attrs.get("model.stop")
+        if type(stop) is bool:
+            metadata["stop"] = stop
+        workflow = attrs.get("model.workflow")
+        if workflow in {"submit_decision", "submit_investigation", "submit_patch"}:
+            metadata["workflow"] = workflow
+        result = attrs.get("result")
+        if result in {"done", "waiting", "progress", "deferred", "error"}:
+            metadata["result"] = result
+        if span.name == "model.generation":
+            model = attrs.get("model.name", "")
+            if not isinstance(model, str) or not re.fullmatch(r"[a-zA-Z0-9_.:/-]{1,160}", model):
+                model = None
+            incoming, outgoing = attrs.get("model.input_tokens"), attrs.get("model.output_tokens")
+            measured = all(type(v) is int and 0 <= v <= 10**9 for v in (incoming, outgoing))
+            metadata["usage_state"] = "provider_reported" if measured else "unknown"
+            usage = {"input": incoming, "output": outgoing} if measured else None
+            cost = None
+            if measured and all(k in metadata for k in ("input_price", "output_price")):
+                cost = {
+                    "input": incoming * metadata["input_price"] / 1_000_000,
+                    "output": outgoing * metadata["output_price"] / 1_000_000,
+                }
+            encoded = self.encode_generation(
+                model=model, metadata=metadata, usage_details=usage, cost_details=cost
+            )
+        else:
+            encoded = self.encode_span(metadata=metadata)
+        encoded.update(
+            {
+                "session.id": self.pseudonym(tenant, "task", task),
+                "langfuse.environment": self.settings.environment,
+            }
+        )
+        # Rebuild rather than copy: discard events, links, status text, resource attributes,
+        # baggage, user input/output and every unrecognized third-party field.
+        return ReadableSpan(
+            name=span.name,
+            context=span.context,
+            parent=span.parent,
+            resource=Resource({"service.name": "agent-py"}),
+            attributes=encoded,
+            start_time=span.start_time,
+            end_time=span.end_time,
+            instrumentation_scope=InstrumentationScope("agent-py-langfuse", "1"),
+        )
+
+    def on_end(self, span):
+        try:
+            safe = self.sanitize(span)
+            if safe is None:
+                self.counter.labels("filtered").inc()
+                return
+            # Only sanitized protobuf bytes enter the bounded asynchronous queue.
+            data = self.encode_spans([safe]).SerializeToString()
+            if len(data) > 16384:
+                self.counter.labels("dropped").inc()
+                return
+            with self.lock:
+                if self.stopping.is_set():
+                    self.counter.labels("dropped").inc()
+                    return
+                try:
+                    self.pending.put_nowait(data)
+                    self.counter.labels("queued").inc()
+                except queue.Full:
+                    self.counter.labels("dropped").inc()
+        except Exception:
+            self.counter.labels("sanitization_failed").inc()
+
+    def _run(self):
+        try:
+            while not self.stopping.is_set() or not self.pending.empty():
+                try:
+                    data = self.pending.get(timeout=0.05)
+                except queue.Empty:
+                    continue
+                with self.lock:
+                    self.active = True
+                try:
+                    # No redirect, proxy inheritance, retry, or unlimited response download.
+                    with self.client.stream(
+                        "POST",
+                        self.settings.langfuse_base_url.rstrip("/") + "/api/public/otel/v1/traces",
+                        content=data,
+                        auth=(
+                            self.settings.langfuse_public_key.get_secret_value(),
+                            self.settings.langfuse_secret_key.get_secret_value(),
+                        ),
+                        headers={
+                            "Content-Type": "application/x-protobuf",
+                            "x-langfuse-ingestion-version": "4",
+                        },
+                    ) as response:
+                        if not 200 <= response.status_code < 300:
+                            raise RuntimeError("Export rejected")
+                        raw = bytearray()
+                        for chunk in response.iter_bytes():
+                            raw.extend(chunk)
+                            if len(raw) > 65536:
+                                raise RuntimeError("Export response exceeds limit")
+                        acknowledgement = self.response_type.FromString(bytes(raw))
+                        if acknowledgement.partial_success.rejected_spans:
+                            raise RuntimeError("Export partially rejected")
+                    self.counter.labels("exported").inc()
+                except Exception:
+                    self.counter.labels("export_failed").inc()
+                finally:
+                    with self.lock:
+                        self.active = False
+                        self.pending.task_done()
+        finally:
+            self.client.close()
+
+    def force_flush(self, timeout_millis=3000):
+        deadline = time.monotonic() + timeout_millis / 1000
+        while time.monotonic() < deadline:
+            if self.pending.unfinished_tasks == 0:
+                return True
+            time.sleep(0.01)
+        return self.pending.unfinished_tasks == 0
+
+    def shutdown(self):
+        with self.lock:
+            self.stopping.set()
+        self.thread.join(timeout=self.settings.langfuse_flush_seconds)
+        with self.lock:
+            while True:
+                try:
+                    self.pending.get_nowait()
+                    self.pending.task_done()
+                    self.counter.labels("dropped").inc()
+                except queue.Empty:
+                    break
