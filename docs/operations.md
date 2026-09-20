@@ -34,6 +34,14 @@ API 的任务、操作、准入和预算 gauge 来源于共享数据库，多 AP
 
 API 返回 `X-Trace-ID`，同一 span 中写入的任务事件携带 trace ID。Worker tick 有独立 span；尚未实现 HTTP→Outbox→Temporal 的完整跨进程父子链和 OTLP Collector 导出。
 
+## Langfuse 接入计划（planned）
+
+已选定 Langfuse 扩展模型调用、逐轮上下文、候选验证、提示词版本与效果分析。当前仍只有上述本地导出，尚无 Langfuse 配置或远端数据上传；实现清单见 [LF-01—LF-04](langfuse.md)。
+
+LF-01 需先处理现有独立 `TracerProvider` 与 SDK 的关联，以及 API→Outbox→Activity 的上下文传播；按任务 session 关联各执行段，等待期间不维持长 span。推理结果复用单独记录，避免虚增调用和费用。Prometheus 继续负责准入、熔断、队列及服务告警。
+
+运维验收需提供独立观测服务部署、租户与环境项目隔离、默认元数据模式、去敏内容的显式出站策略、队列上限和关闭 flush 时限。分别测试断网、错误凭证、队列满、硬杀与恢复，记录遥测丢失和启用前后的开销；平台故障不重试业务动作，不要求重新付费推理来补轨迹。提示词使用随发布固定的本地快照，评测证据缺失则阻止实验通过。
+
 ## 监控示例与处置
 
 `ops/prometheus.yml` 假设 Prometheus 与应用在同一宿主机，需替换地址并在 `/etc/prometheus/agent-metrics-token` 放置只含凭证的私密文件。容器内的 localhost 不指向宿主机。`ops/alerts.yml` 和 `ops/grafana-dashboard.json` 是待部署模板，未在真实 Prometheus/Grafana 上验收，也未配置 Alertmanager 接收人。可在安装后运行 `promtool check config ops/prometheus.yml` 和 `promtool check rules ops/alerts.yml`。
