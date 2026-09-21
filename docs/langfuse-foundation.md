@@ -30,6 +30,8 @@ AGENT_LANGFUSE_QUEUE_SIZE=256
 AGENT_LANGFUSE_TIMEOUT_SECONDS=2
 AGENT_LANGFUSE_FLUSH_SECONDS=3
 AGENT_LANGFUSE_SAMPLE_RATE=1
+AGENT_LANGFUSE_BATCH_SIZE=16
+AGENT_LANGFUSE_BATCH_WAIT_SECONDS=0.05
 ```
 
 端点必须是 HTTPS origin，不接受 URL 凭证、路径、查询或 fragment；development/test 可使用 loopback HTTP。生产不得降级 HTTP。安装缺失 SDK 或启用时配置缺失会在启动阶段失败；运行中的网络故障则仅影响遥测。
@@ -46,9 +48,9 @@ tenant、task session、推理身份使用独立密钥的 HMAC-SHA256 伪名，�
 
 不导出任务目标、查询原文、证据正文、源代码、补丁、模型输出、异常信息、headers、原始业务 ID 或凭证。正文摘要不等于内容授权，因此首期不支持 redacted/input-output 模式。其他 exporter（包括本地 JSONL）仍执行各自白名单，不能认为 Langfuse 过滤器会替它们脱敏。
 
-排队内容仅为净化后的 protobuf，每项最多 16 KiB；队列默认 256、最多 4096 项，另有一个在途请求。满队列、新请求发生在关闭后、超出大小或净化失败时丢弃遥测，不阻塞业务。导出线程使用一次 HTTP 请求，不重试、不跟随跳转、不继承代理环境；响应限制 64 KiB，非 2xx、无效 protobuf 或 OTLP partial rejection 都计为导出失败。
+排队内容仅为净化后的 protobuf，每项最多 16 KiB；队列默认 256、最多 4096 项，另有一组正在组装或发送的批次（默认 16 条、最多 64 条）。满队列、新请求发生在关闭后、超出大小或净化失败时丢弃遥测，不阻塞业务。单个导出线程将净化后的 OTLP 消息合并成批，每批仅发送一次 HTTP 请求，不重试、不跟随跳转、不继承代理环境；响应限制 64 KiB，非 2xx、无效 protobuf 或 OTLP partial rejection 都将整批按 span 数计为导出失败；部分拒收无法识别具体接受了哪些 span，因此这一计数是保守分类，不表示平台一条都未接收。
 
-请求 I/O timeout 默认 2 秒，关闭最多等待 3 秒后丢弃剩余队列；在途 daemon 线程可能继续至 I/O 结束。该 timeout 不是网络请求的绝对墙钟终止保证。正常 CLI 退出、API lifespan 和 Worker shutdown 关闭 provider；SIGKILL 可能丢失未导出数据，禁止重跑业务来补 trace。
+请求 I/O timeout 默认 2 秒，关闭最多等待 3 秒后丢弃剩余队列；正在组装的批次会提前结束等待；在途 daemon 线程可能继续至 I/O 结束，完成后整批计入成功/失败。该 timeout 不是网络请求的绝对墙钟终止保证。正常 CLI 退出、API lifespan 和 Worker shutdown 关闭 provider；SIGKILL 可能丢失未导出数据，禁止重跑业务来补 trace。
 
 Prometheus 指标 `agent_langfuse_spans_total{result=...}` 包含 `queued`、`exported`、`filtered`、`dropped`、`sanitization_failed`、`export_failed`、`correlation_failed`、`sampled_out`。`exported` 只表示接收端返回成功 OTLP 应答，不证明平台页面已经完整可见。没有把任务/租户 ID 放入新增指标标签。
 
@@ -116,12 +118,37 @@ make langfuse-check
 
 报告存放在 `.runtime/langfuse/run-*/report.json`，包含源码/锁文件摘要、逐任务墙钟延迟、P50/P95、吞吐、工作负载 CPU 时间、进程峰值 RSS、关闭耗时及导出/失败/丢弃计数。缺失子进程结果、净化泄漏、业务结果变化、队列未排空、未触发预期故障都会使 correctness=FAIL 并返回非零。只有显式传入预设上限才计算 performance=PASS/FAIL；默认 NOT_ASSESSED，不将功能通过冒充性能通过。Bitbucket 自定义 `langfuse-local-probe` 流程保留报告。
 
-这属于小样本本地探索：包含 SDK/解释器启动内存、没有剔除预热、没有置信区间，也没有控制宿主机其他负载；CPU 仅测主动任务阶段，RSS 为整个子进程峰值。此处 P95 是创建/提议/执行三个同步方法的合计耗时，不能替代真实 API/Temporal/模型的端到端性能。2026-09-21 三轮各 40 任务实测：关闭 P95 11.74—19.03 ms，正常导出 P95 26.51—42.94 ms，阻塞场景每轮丢弃 113 条，功能检查通过；未预设性能阈值，不能据此宣布生产验收通过。异步导出仍有可测开销，后续应评估批量发送与生产负载下的队列容量。
+这属于小样本本地探索：包含 SDK/解释器启动内存、没有剔除预热、没有置信区间，也没有控制宿主机其他负载；CPU 仅测主动任务阶段，RSS 为整个子进程峰值。此处 P95 是创建/提议/执行三个同步方法的合计耗时，不能替代真实 API/Temporal/模型的端到端性能。批量实现前，2026-09-21 三轮各 40 任务实测：关闭 P95 11.74—19.03 ms，正常导出 P95 26.51—42.94 ms，阻塞场景每轮丢弃 113 条，功能检查通过；未预设性能阈值，不能据此宣布生产验收通过。异步导出仍有可测开销，后续应评估批量发送与生产负载下的队列容量。
+
+### 有界批量发送
+
+`AGENT_LANGFUSE_BATCH_SIZE` 范围 1—64，默认 16；`AGENT_LANGFUSE_BATCH_WAIT_SECONDS` 范围 0—1 秒，默认 0.05。从第一条出队开始计时，批次满或等待到期即发送。显式 force_flush 和 shutdown 会唤醒组装线程提前发送，不额外等待批次定时器。等待时间不包括排队与网络 I/O，不能当作导出的端到端时延上限。
+
+每条队列消息最多 16 KiB，因此单批请求体最多 `batch_size × 16 KiB`，绝对上限 1 MiB。队列容量仍按 span 计算；组装批次也有容量上限，合并请求体时会额外分配一份有界字节缓冲区。只合并已净化的 protobuf，不把原始 span/业务参数留在后台队列。所有 exported/export_failed/queued/dropped 计数仍以 span 为单位，不因请求合并改变单位。
+
+对照命令依次执行，避免两个负载同时运行：
+
+```bash
+.venv/bin/python scripts/check_langfuse.py --tasks 40 --repeats 3 --batch-size 1
+.venv/bin/python scripts/check_langfuse.py --tasks 40 --repeats 3 --batch-size 16
+```
+
+报告新增 batch_size、HTTP 请求数和最大请求体字节数。2026-09-21 依次运行上述两组命令，三轮健康端点的结果如下；两组均完整接收每轮 120 条 span，五种场景的功能检查全部通过。
+
+| 指标（每轮 40 个任务） | batch_size=1 | batch_size=16 |
+|---|---|---|
+| HTTP 请求数 | 120 | 11—13 |
+| 同步任务 P95 | 23.57—45.91 ms | 18.16—22.43 ms |
+| 主动负载 CPU 时间 | 0.99—1.57 s | 0.65—0.75 s |
+
+原始报告分别为 `.runtime/langfuse/run-elwzuir2/report.json` 与 `.runtime/langfuse/run-m13pnr4b/report.json`。此测量显示本地请求数减少约 90%，没有预设性能阈值，performance 仍为 NOT_ASSESSED；顺序执行也不能排除宿主机负载变化，不将范围差异直接当作生产提速比例。
+
+单条模式保留为回退配置；它仍使用同一有界队列、脱敏及故障策略。批量发送增加了低流量下的等待时间，并扩大了单次不确定应答影响的 span 数；真实平台吞吐与接收限制仍需实际验收。
 
 ## 验证与待办
 
 ```bash
-.venv/bin/pytest tests/test_langfuse.py tests/test_trace_context.py tests/test_stage_observations.py tests/test_operation_observations.py -q
+.venv/bin/pytest tests/test_langfuse.py tests/test_trace_context.py tests/test_stage_observations.py tests/test_operation_observations.py tests/test_langfuse_batching.py -q
 env AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_trace_context.py -m integration -q
 env AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q
 ```

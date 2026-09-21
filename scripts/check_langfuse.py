@@ -30,7 +30,7 @@ def inputs():
     }
 
 
-def run_case(mode, count, directory):
+def run_case(mode, count, directory, batch_size=16):
     from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
     from sqlalchemy import func, select
 
@@ -50,7 +50,7 @@ def run_case(mode, count, directory):
 
         def do_POST(self):
             length = int(self.headers.get("Content-Length", "0"))
-            if self.path != "/api/public/otel/v1/traces" or not 0 < length <= 16384:
+            if self.path != "/api/public/otel/v1/traces" or not 0 < length <= batch_size * 16384:
                 self.send_error(400)
                 return
             payloads.append(self.rfile.read(length))
@@ -82,6 +82,7 @@ def run_case(mode, count, directory):
             langfuse_queue_size=4 if mode == "blocked" else 4096,
             langfuse_timeout_seconds=0.2,
             langfuse_flush_seconds=2,
+            langfuse_batch_size=batch_size,
         )
         db = Database(settings.database_url)
         db.create_schema()
@@ -184,6 +185,9 @@ def run_case(mode, count, directory):
             close_ms=close_ms,
             counters=counters,
             received_spans=dict(names),
+            http_requests=len(payloads),
+            largest_request_bytes=max(map(len, payloads), default=0),
+            batch_size=batch_size,
         )
     finally:
         release.set()
@@ -202,7 +206,10 @@ def main():
     parser.add_argument("--output-dir", type=Path, default=ROOT / ".runtime/langfuse")
     parser.add_argument("--max-added-p95-ms", type=float)
     parser.add_argument("--case", choices=MODES, help=argparse.SUPPRESS)
+    parser.add_argument("--batch-size", type=int, default=16)
     args = parser.parse_args()
+    if not 1 <= args.batch_size <= 64:
+        parser.error("batch-size must be 1..64")
     if not 8 <= args.tasks <= 500 or not 1 <= args.repeats <= 10:
         parser.error("tasks must be 8..500; repeats must be 1..10")
     if args.max_added_p95_ms is not None and (
@@ -215,7 +222,7 @@ def main():
             del os.environ[key]
     if args.case:
         with tempfile.TemporaryDirectory(prefix="langfuse-probe-") as temporary:
-            result = run_case(args.case, args.tasks, Path(temporary))
+            result = run_case(args.case, args.tasks, Path(temporary), args.batch_size)
         print(json.dumps(result))
         return
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -234,6 +241,8 @@ def main():
                         mode,
                         "--tasks",
                         str(args.tasks),
+                        "--batch-size",
+                        str(args.batch_size),
                     ],
                     cwd=ROOT,
                     capture_output=True,

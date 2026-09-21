@@ -69,6 +69,8 @@ class LangfuseProcessor(SpanProcessor):
         self.pending = queue.Queue(maxsize=settings.langfuse_queue_size)
         self.lock = threading.Lock()
         self.stopping = threading.Event()
+        self.wake = threading.Event()
+        self.flushing = threading.Event()
         self.active = False
         self.client = httpx.Client(
             timeout=settings.langfuse_timeout_seconds,
@@ -221,6 +223,7 @@ class LangfuseProcessor(SpanProcessor):
                 try:
                     self.pending.put_nowait(data)
                     self.counter.labels("queued").inc()
+                    self.wake.set()
                 except queue.Full:
                     self.counter.labels("dropped").inc()
         except Exception:
@@ -235,6 +238,22 @@ class LangfuseProcessor(SpanProcessor):
                     continue
                 with self.lock:
                     self.active = True
+                batch = [data]
+                deadline = time.monotonic() + self.settings.langfuse_batch_wait_seconds
+                while len(batch) < self.settings.langfuse_batch_size:
+                    try:
+                        batch.append(self.pending.get_nowait())
+                    except queue.Empty:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0 or self.stopping.is_set() or self.flushing.is_set():
+                            break
+                        self.wake.wait(remaining)
+                        self.wake.clear()
+                # Each item is an ExportTraceServiceRequest containing only repeated
+                # resource_spans. Concatenation is protobuf merge semantics, preserving
+                # every span without decoding payloads or retaining raw application data.
+                # At most 64 * 16 KiB can be held by this single exporter thread.
+                data = b"".join(batch)
                 try:
                     # No redirect, proxy inheritance, retry, or unlimited response download.
                     with self.client.stream(
@@ -260,17 +279,26 @@ class LangfuseProcessor(SpanProcessor):
                         acknowledgement = self.response_type.FromString(bytes(raw))
                         if acknowledgement.partial_success.rejected_spans:
                             raise RuntimeError("Export partially rejected")
-                    self.counter.labels("exported").inc()
+                    self.counter.labels("exported").inc(len(batch))
                 except Exception:
-                    self.counter.labels("export_failed").inc()
+                    # Partial rejection cannot identify individual accepted spans;
+                    # conservatively classify the entire batch as failed, never retry.
+                    self.counter.labels("export_failed").inc(len(batch))
                 finally:
                     with self.lock:
                         self.active = False
-                        self.pending.task_done()
+                        for _ in batch:
+                            self.pending.task_done()
+                        if self.pending.unfinished_tasks == 0:
+                            self.flushing.clear()
         finally:
             self.client.close()
 
     def force_flush(self, timeout_millis=3000):
+        if self.pending.unfinished_tasks == 0:
+            return True
+        self.flushing.set()
+        self.wake.set()
         deadline = time.monotonic() + timeout_millis / 1000
         while time.monotonic() < deadline:
             if self.pending.unfinished_tasks == 0:
@@ -281,6 +309,7 @@ class LangfuseProcessor(SpanProcessor):
     def shutdown(self):
         with self.lock:
             self.stopping.set()
+            self.wake.set()
         self.thread.join(timeout=self.settings.langfuse_flush_seconds)
         with self.lock:
             while True:
