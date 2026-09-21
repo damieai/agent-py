@@ -28,6 +28,7 @@ from agent_py.domain import (
     TaskContract,
     digest,
 )
+from agent_py.observations import operation_attributes, stage
 from agent_py.security import authorize, check_grant
 
 
@@ -240,6 +241,12 @@ class Service:
             return t
 
     def propose(self, p: Principal, task_id: str, step: str, action: ActionProposal) -> Operation:
+        with stage(self.telemetry, "operation.propose", p.tenant_id, task_id) as span:
+            operation = self._propose(p, task_id, step, action, span)
+            span.set_attributes(operation_attributes(self, operation))
+            return operation
+
+    def _propose(self, p, task_id, step, action, span):
         validate_parameters(action.tool, action.parameters)
         if not step or len(step) > 160:
             raise DomainError("INVALID_STEP", "A bounded step identity is required", 422)
@@ -260,6 +267,7 @@ class Service:
             if existing:
                 if existing.payload_digest != h:
                     raise DomainError("IDEMPOTENCY_CONFLICT", "Step already binds another action")
+                span.set_attribute("stage.changed", False)
                 return existing
             count = s.scalar(
                 select(func.count())
@@ -291,9 +299,22 @@ class Service:
                 t.status, t.waiting_reason = "WAITING", "APPROVAL"
             emit(s, t, "operation.proposed", {"operation_id": op.id, "tool": op.tool})
             s.flush()
+            span.set_attribute("stage.changed", True)
             return op
 
     def decide(self, p: Principal, approval_id: str, decision: str, expected_digest: str):
+        # Task identity is attached only after the existing tenant/auth checks succeed.
+        with self.telemetry.span("operation.approval", **{"tenant.id": p.tenant_id}) as span:
+            try:
+                approval = self._decide(p, approval_id, decision, expected_digest, span)
+            except Exception:
+                span.set_attribute("stage.outcome", "error")
+                raise
+            span.set_attribute("stage.outcome", "completed")
+            span.set_attribute("stage.decision", approval.status)
+            return approval
+
+    def _decide(self, p, approval_id, decision, expected_digest, span):
         if decision not in {"approve", "reject"}:
             raise DomainError("INVALID_DECISION", "Invalid approval decision", 422)
         with self.db.session(p.tenant_id) as s:
@@ -301,6 +322,9 @@ class Service:
             op = tenant_get(s, Operation, a.operation_id, p.tenant_id)
             t = tenant_get(s, Task, op.task_id, p.tenant_id)
             authorize(s, p, t, "approver")
+            span.set_attribute("task.id", t.id)
+            span.set_attributes(operation_attributes(self, op))
+            span.set_attribute("stage.changed", False)
             if t.contract["environment"] == "production" and p.subject == t.principal:
                 raise DomainError(
                     "SEPARATION_OF_DUTIES", "Production approver must be independent", 403
@@ -331,6 +355,7 @@ class Service:
                     return a
                 raise DomainError("APPROVAL_CLOSED", "Approval expired or already decided")
             emit(s, t, "approval.decided", {"operation_id": op.id, "decision": target})
+            span.set_attribute("stage.changed", True)
             return a
 
     def _executable(self, s, t: Task):
@@ -352,7 +377,14 @@ class Service:
         with self.db.session(tenant) as s:
             op = tenant_get(s, Operation, operation_id, tenant, True)
             if op.status != "NOT_SUBMITTED":
-                return op
+                with stage(
+                    self.telemetry,
+                    "operation.result_reused",
+                    tenant,
+                    op.task_id,
+                    **operation_attributes(self, op),
+                ):
+                    return op
             if op.tool not in self.remote.supported_tools:
                 raise DomainError(
                     "CAPABILITY_UNAVAILABLE", "Write capability has not been certified", 503
@@ -392,14 +424,24 @@ class Service:
             t.status, t.waiting_reason = "RUNNING", None
             emit(s, t, "operation.dispatched", {"operation_id": op.id})
             tool, resource, params = op.tool, op.resource, op.parameters
-        try:
-            result = self.remote.execute(tenant, operation_id, tool, resource, params)
-        except ConfirmedFailure as exc:
-            return self._record(tenant, operation_id, "FAILED", None, str(exc))
-        except Exception as exc:
-            # Even transport and local adapter errors are conservatively unknown after dispatch.
-            return self._record(tenant, operation_id, "UNKNOWN", None, type(exc).__name__)
-        return self._record(tenant, operation_id, "SUCCEEDED", result)
+        with stage(
+            self.telemetry,
+            "operation.execute",
+            tenant,
+            op.task_id,
+            **operation_attributes(self, op),
+        ) as span:
+            try:
+                result = self.remote.execute(tenant, operation_id, tool, resource, params)
+            except ConfirmedFailure as exc:
+                recorded = self._record(tenant, operation_id, "FAILED", None, str(exc))
+            except Exception as exc:
+                # Even transport and local adapter errors are unknown after dispatch.
+                recorded = self._record(tenant, operation_id, "UNKNOWN", None, type(exc).__name__)
+            else:
+                recorded = self._record(tenant, operation_id, "SUCCEEDED", result)
+            span.set_attribute("stage.status", recorded.status)
+            return recorded
 
     def _record(self, tenant: str, op_id: str, status: str, result: dict | None, error=None):
         if status == "SUCCEEDED" and (
@@ -449,10 +491,20 @@ class Service:
             op = tenant_get(s, Operation, operation_id, tenant)
             if op.status not in {"UNKNOWN", "PENDING"}:
                 return op
-        result = self.remote.query(tenant, operation_id)
-        if result is None:
-            return self._record(tenant, operation_id, "UNKNOWN", None, "NOT_YET_CONFIRMED")
-        return self._record(tenant, operation_id, "SUCCEEDED", result)
+        with stage(
+            self.telemetry,
+            "operation.query",
+            tenant,
+            op.task_id,
+            **operation_attributes(self, op),
+        ) as span:
+            result = self.remote.query(tenant, operation_id)
+            if result is None:
+                recorded = self._record(tenant, operation_id, "UNKNOWN", None, "NOT_YET_CONFIRMED")
+            else:
+                recorded = self._record(tenant, operation_id, "SUCCEEDED", result)
+            span.set_attribute("stage.status", recorded.status)
+            return recorded
 
     def escalate_uncertain(self, tenant: str, operation_id: str):
         with self.db.session(tenant) as s:

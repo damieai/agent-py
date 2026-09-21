@@ -41,7 +41,7 @@ tenant、task session、推理身份使用独立密钥的 HMAC-SHA256 伪名，�
 
 ## 导出与数据边界
 
-允许导出的 span 名仅有 `task.accepted`、`task.dispatch`、`worker.tick`、`model.generation`、`model.result_reused`、`retrieval.compile`、`tool.read`、`sandbox.verify`，且 instrumentation scope 必须是项目自己的 `agent-py`。应用端只添加选定字段；处理器在排队前重建干净 span，剔除其余属性、事件、未允许的 links、status 文本和资源元数据。
+允许导出的 span 名仅有 `task.accepted`、`task.dispatch`、`worker.tick`、`model.generation`、`model.result_reused`、`retrieval.compile`、`tool.read`、`sandbox.verify` 及下述五种 `operation.*`，且 instrumentation scope 必须是项目自己的 `agent-py`。应用端只添加选定字段；处理器在排队前重建干净 span，剔除其余属性、事件、未允许的 links、status 文本和资源元数据。
 
 不导出任务目标、查询原文、证据正文、源代码、补丁、模型输出、异常信息、headers、原始业务 ID 或凭证。正文摘要不等于内容授权，因此首期不支持 redacted/input-output 模式。其他 exporter（包括本地 JSONL）仍执行各自白名单，不能认为 Langfuse 过滤器会替它们脱敏。
 
@@ -79,18 +79,34 @@ Dispatcher 保存首次派发的 traceparent，通过 Temporal workflow/activity
 
 不导出查询、证据 ID/正文、URL、工具参数、凭证、文件路径、代码、stdout/stderr、异常文本。严格校验阶段字段的类型、范围及枚举。默认关闭时无外部上传；现有本地 exporter 继续使用自己的白名单。
 
-本地测试通过真实 Harness、读取重试策略和 VerificationRunner，使用 MockTransport 与替代沙盒验证阶段语义和净化结果；没有执行真实企业服务请求或 Docker 回归。写动作的提议/审批/派发/UNKNOWN/确认观测仍待实现，不能把只读工具 span 当作完整动作生命周期。
+本地测试通过真实 Harness、读取重试策略和 VerificationRunner，使用 MockTransport 与替代沙盒验证阶段语义和净化结果；没有执行真实企业服务请求或 Docker 回归。写动作观测见下一节，不能把只读工具 span 当作写操作执行。
+
+## 写动作生命周期
+
+| span | 记录边界 |
+|---|---|
+| `operation.propose` | 提议方法返回/失败，`changed` 区分新建和幂等复用 |
+| `operation.approval` | 已通过租户及审批角色检查的决定，记录 APPROVED/REJECTED；`changed=false` 表示重复决定 |
+| `operation.execute` | 只有 CAS 成功并提交 PENDING 意图后才进入；包围适配器执行及本地回执落账 |
+| `operation.query` | 对 PENDING/UNKNOWN 动作进行权威查询及回执校验；终态调用不产生查询 span |
+| `operation.result_reused` | execute 读到已有派发/终态记录，直接复用而不调用适配器 |
+
+元数据包含固定工具类型、账本 attempts、执行配置 simulation/live、状态及 operation HMAC 伪名；相同租户/任务/动作的各阶段使用相同伪名。不会导出参数、resource、审批人、外部回执 ID、返回正文或异常文本。生命周期 span 不生成模型 usage/cost。
+
+`stage.outcome=completed` 表示方法正常返回，动作成败必须读取 `status`：响应丢失、未经确认的回执仍为 UNKNOWN；适配器明确拒绝才为 FAILED；只有账本接受权威确认后才记录 SUCCEEDED。本地落账失败记录 error 和派发后的 PENDING，恢复必须查询权威，不依据 span 重发动作。`changed` 只有在 outcome=completed 时才能视作方法成功提交后的变更指示；它不是审计事件。
+
+执行模式来自服务配置，不是外部能力认证。当前测试使用本地持久化 SimulatedSystem，包含响应丢失、回执滞后、并发 CAS、审批重试、无效回执及落账失败；未认证的 live 写适配器仍在派发前拒绝。真实企业写动作验收、人工升级/取消/补偿的完整观测以及平台展示仍未完成。
 
 ## 验证与待办
 
 ```bash
-.venv/bin/pytest tests/test_langfuse.py tests/test_trace_context.py tests/test_stage_observations.py -q
+.venv/bin/pytest tests/test_langfuse.py tests/test_trace_context.py tests/test_stage_observations.py tests/test_operation_observations.py -q
 env AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_trace_context.py -m integration -q
 env AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q
 ```
 
 测试使用实际锁定 SDK 的属性编码、实际 OTel span/protobuf 和 MockTransport，不需要外部凭证。覆盖线程上下文、跨租户过滤、多 exporter 数据边界、复用不重复计费、未知 usage、容量丢弃、超时关闭、平台失败/跳转/partial rejection 及 CLI 清理。Python CI 安装 langfuse extra 后执行这些测试；缺少可选 SDK 的常规环境会显式跳过此测试模块。
 
-LF-01 仍待：真实 Langfuse OTLP 联调和三类真实模型轨迹、写动作生命周期 observation、采样、完整项目权限与保留/删除策略、自托管服务/镜像摘要锁定、部署/断网/吞吐与 P95 性能验收。当前不能用这份基础代码宣称完成完整 LF-01，更不能宣称策略质量已经提高。
+LF-01 仍待：真实 Langfuse OTLP 联调和三类真实模型轨迹、人工升级/取消/补偿 observation、采样、完整项目权限与保留/删除策略、自托管服务/镜像摘要锁定、部署/断网/吞吐与 P95 性能验收。当前不能用这份基础代码宣称完成完整 LF-01，更不能宣称策略质量已经提高。
 
 官方依据：[SDK 与 OTel](https://langfuse.com/docs/observability/sdk/overview)、[现有 OTel 集成](https://langfuse.com/faq/all/existing-otel-setup)、[Python API 参考](https://python.reference.langfuse.com/langfuse)。实际编码以锁定 4.15.4 源码及 wire-format 测试为准。

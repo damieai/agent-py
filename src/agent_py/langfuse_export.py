@@ -33,6 +33,21 @@ STAGE_NUMBERS = {
     "tool.read": {"attempt": (1, 3)},
     "sandbox.verify": {"exit_code": (-255, 255)},
 }
+OPERATIONS = {
+    "operation.propose",
+    "operation.approval",
+    "operation.execute",
+    "operation.query",
+    "operation.result_reused",
+}
+for name in OPERATIONS:
+    STAGES[name] = {
+        "tool": {"create_pr", "trigger_ci", "merge_pr", "deploy", "rollback", "runbook"},
+        "status": {"NOT_SUBMITTED", "PENDING", "UNKNOWN", "SUCCEEDED", "FAILED"},
+        "execution_mode": {"simulation", "live"},
+    }
+    STAGE_NUMBERS[name] = {"attempt": (0, 100)}
+STAGES["operation.approval"]["decision"] = {"APPROVED", "REJECTED"}
 DIGESTS = {"request_digest", "prompt_digest", "context_digest", "release_digest"}
 NUMBERS = {"reserved_micro_usd", "input_price", "output_price"}
 
@@ -86,6 +101,16 @@ class LangfuseProcessor(SpanProcessor):
         ):
             return None
         metadata = {"tenant": self.pseudonym(tenant, "tenant", tenant)}
+        if span.name in OPERATIONS:
+            identifier = attrs.get("operation.id")
+            if isinstance(identifier, str) and 0 < len(identifier) <= 160:
+                metadata["operation_id"] = self.pseudonym(
+                    tenant, "operation", task + ":" + identifier
+                )
+            if span.name in {"operation.propose", "operation.approval"}:
+                changed = attrs.get("stage.changed")
+                if type(changed) is bool:
+                    metadata["changed"] = changed
         if span.name in STAGES:
             for field, allowed in {"outcome": {"completed", "error"}, **STAGES[span.name]}.items():
                 value = attrs.get("stage." + field)

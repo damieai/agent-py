@@ -18,3 +18,13 @@ def stage(telemetry, name, tenant, task_id, **attributes):
             raise
         else:
             span.set_attribute("stage.outcome", "completed")
+
+
+def operation_attributes(service, operation):
+    return {
+        "operation.id": operation.id,
+        "stage.tool": operation.tool,
+        "stage.attempt": operation.attempts,
+        "stage.status": operation.status,
+        "stage.execution_mode": service.settings.execution_mode,
+    }

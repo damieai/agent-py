@@ -1,6 +1,6 @@
 # Langfuse 接入与 Agent 效果优化
 
-状态：**LF-01 partially implemented / locally verified；LF-02—LF-04 planned**。2026-09-20 确定接入方向。已实现可选 SDK/OTLP 元数据导出、跨进程关联及检索/只读工具/沙盒阶段观测，见 [基础接入与验证边界](langfuse-foundation.md)。默认不启用外部上传；真实 Langfuse、真实模型和生产部署验收尚未完成。下文保留完整目标契约，不将局部实现等同于整体验收。
+状态：**LF-01 partially implemented / locally verified；LF-02—LF-04 planned**。2026-09-20 确定接入方向。已实现可选 SDK/OTLP 元数据导出、跨进程关联、检索/只读工具/沙盒阶段及写动作生命周期观测，见 [基础接入与验证边界](langfuse-foundation.md)。默认不启用外部上传；真实 Langfuse、真实模型和生产部署验收尚未完成。下文保留完整目标契约，不将局部实现等同于整体验收。
 
 ## 目标与交付能力
 
