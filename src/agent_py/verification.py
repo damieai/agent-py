@@ -54,6 +54,25 @@ class VerificationRunner:
     def __init__(self, service, sandbox_factory=DockerSandbox):
         self.service, self.sandbox_factory = service, sandbox_factory
 
+    def _verify(self, sandbox, principal, task_id, workspace, oracle, phase):
+        from agent_py.observations import stage
+
+        with stage(
+            self.service.telemetry,
+            "sandbox.verify",
+            principal.tenant_id,
+            task_id,
+            **{"stage.phase": phase},
+        ) as span:
+            result = sandbox.verify(
+                workspace,
+                oracle=oracle,
+                timeout_seconds=self.service.settings.sandbox_timeout_seconds,
+            )
+            span.set_attribute("stage.exit_code", result.exit_code)
+            span.set_attribute("stage.limit", result.limit or "none")
+            return result
+
     def _check(self, principal, task_id):
         with self.service.db.session(principal.tenant_id) as s:
             task = tenant_get(s, Task, task_id, principal.tenant_id)
@@ -112,13 +131,9 @@ class VerificationRunner:
                 for path in base_manifest
             }
             self._check(principal, task_id)
-            before = sandbox.verify(
-                baseline, oracle=oracle_copy, timeout_seconds=settings.sandbox_timeout_seconds
-            )
+            before = self._verify(sandbox, principal, task_id, baseline, oracle_copy, "baseline")
             self._check(principal, task_id)
-            after = sandbox.verify(
-                candidate, oracle=oracle_copy, timeout_seconds=settings.sandbox_timeout_seconds
-            )
+            after = self._verify(sandbox, principal, task_id, candidate, oracle_copy, "candidate")
             self._check(principal, task_id)
             if (
                 before.limit

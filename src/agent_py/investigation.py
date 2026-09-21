@@ -48,7 +48,9 @@ class InvestigationHarness:
             projects=[contract["project"]],
             environments=[contract["environment"]],
         )
-        compiler = ContextCompiler(service.db, service.settings.context_strategy)
+        compiler = ContextCompiler(
+            service.db, service.settings.context_strategy, telemetry=service.telemetry
+        )
         if service.settings.collection_manifest is not None:
             from agent_py.collection import CollectionManifest, EvidenceCollector
 

@@ -14,6 +14,25 @@ from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 
 NAMES = {"task.accepted", "task.dispatch", "worker.tick", "model.generation", "model.result_reused"}
+STAGES = {
+    "retrieval.compile": {"strategy": {"lexical", "bm25_rrf"}},
+    "tool.read": {
+        "provider": {"bitbucket_pr", "jira_issue", "jenkins_build", "kubernetes_deployment"}
+    },
+    "sandbox.verify": {
+        "phase": {"baseline", "candidate"},
+        "limit": {"none", "TIMEOUT", "OUTPUT_LIMIT"},
+    },
+}
+STAGE_NUMBERS = {
+    "retrieval.compile": {
+        "document_count": (0, 100_000),
+        "omitted_count": (0, 100_000),
+        "context_bytes": (0, 100_000),
+    },
+    "tool.read": {"attempt": (1, 3)},
+    "sandbox.verify": {"exit_code": (-255, 255)},
+}
 DIGESTS = {"request_digest", "prompt_digest", "context_digest", "release_digest"}
 NUMBERS = {"reserved_micro_usd", "input_price", "output_price"}
 
@@ -58,7 +77,7 @@ class LangfuseProcessor(SpanProcessor):
         attrs = span.attributes or {}
         tenant, task = attrs.get("tenant.id"), attrs.get("task.id")
         if (
-            span.name not in NAMES
+            span.name not in NAMES | STAGES.keys()
             or tenant != self.settings.langfuse_tenant
             or not isinstance(task, str)
             or len(task) > 160
@@ -67,6 +86,22 @@ class LangfuseProcessor(SpanProcessor):
         ):
             return None
         metadata = {"tenant": self.pseudonym(tenant, "tenant", tenant)}
+        if span.name in STAGES:
+            for field, allowed in {"outcome": {"completed", "error"}, **STAGES[span.name]}.items():
+                value = attrs.get("stage." + field)
+                if isinstance(value, str) and value in allowed:
+                    metadata[field] = value
+            for field, (minimum, maximum) in STAGE_NUMBERS[span.name].items():
+                value = attrs.get("stage." + field)
+                if type(value) is int and minimum <= value <= maximum:
+                    metadata[field] = value
+            value = attrs.get("stage.context_digest")
+            if (
+                span.name == "retrieval.compile"
+                and isinstance(value, str)
+                and re.fullmatch(r"[a-f0-9]{64}", value)
+            ):
+                metadata["context_digest"] = value
         for field in DIGESTS:
             value = attrs.get("model." + field)
             if isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value):

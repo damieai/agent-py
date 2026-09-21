@@ -41,7 +41,7 @@ tenant、task session、推理身份使用独立密钥的 HMAC-SHA256 伪名，�
 
 ## 导出与数据边界
 
-允许导出的 span 名仅有 `task.accepted`、`task.dispatch`、`worker.tick`、`model.generation`、`model.result_reused`，且 instrumentation scope 必须是项目自己的 `agent-py`。应用端只添加选定字段；处理器在排队前重建干净 span，剔除其余属性、事件、未允许的 links、status 文本和资源元数据。
+允许导出的 span 名仅有 `task.accepted`、`task.dispatch`、`worker.tick`、`model.generation`、`model.result_reused`、`retrieval.compile`、`tool.read`、`sandbox.verify`，且 instrumentation scope 必须是项目自己的 `agent-py`。应用端只添加选定字段；处理器在排队前重建干净 span，剔除其余属性、事件、未允许的 links、status 文本和资源元数据。
 
 不导出任务目标、查询原文、证据正文、源代码、补丁、模型输出、异常信息、headers、原始业务 ID 或凭证。正文摘要不等于内容授权，因此首期不支持 redacted/input-output 模式。其他 exporter（包括本地 JSONL）仍执行各自白名单，不能认为 Langfuse 过滤器会替它们脱敏。
 
@@ -63,16 +63,34 @@ Dispatcher 保存首次派发的 traceparent，通过 Temporal workflow/activity
 
 本地验证覆盖真实 API 请求、Outbox ACK 丢失、多个独立 Worker 进程、租约 fencing、元数据故障降级，以及原生 Temporal 参数传递和 history replay。原生 PostgreSQL 验证迁移升降级、RLS 和跨租户外键。导出使用 MockTransport；Langfuse 平台中的 links 展示、检索和保留策略仍待真实联调。
 
+## 检索、只读工具与沙盒阶段
+
+三个阶段以普通 Langfuse span 编码，在 Worker 内继承当前 tick 的父上下文；API 上下文预览继承请求 span，CLI 直接调用可独立成根，通过 session 归属任务。没有 task ID 的离线检索不导出阶段记录。
+
+| 阶段 | 白名单元数据 | 语义 |
+|---|---|---|
+| `retrieval.compile` | lexical/BM25-RRF 策略、纳入/省略数量、上下文字节数、上下文摘要 | 每次实际编译一条；持久化上下文复用、ACL 复核不伪造新检索 |
+| `tool.read` | 四类企业读取 provider、局部重试序号 1—3 | 每次进入读取 callback 一条；授权、熔断、并发限制在 callback 前拒绝时不记录读取 |
+| `sandbox.verify` | baseline/candidate 阶段、退出码、TIMEOUT/OUTPUT_LIMIT/none | 每次验证器调用一条；基线抛异常时不伪造候选执行 |
+
+各阶段的 `outcome=completed|error` 表示调用返回或抛异常。`completed` 不等于证据已授权入库、回归通过或业务验证成功；沙盒结论仍由验证报告决定。工具 callback 包含凭证检查和客户端初始化，因此进入 callback 不保证已经发出网络请求。attempt 只表示本次读取策略内的重试序号，不是跨 Activity 的全局尝试数。
+
+检索数量是纳入/省略的结果项数量，BM25-RRF 下可能为文档分块。现有 `estimated_tokens` 实际按 UTF-8 序列化字节计算，因此观测明确使用 `context_bytes`，不能用于模型 token 计费。阶段只记录总耗时，不声称拆出了网络或容器启动时间。
+
+不导出查询、证据 ID/正文、URL、工具参数、凭证、文件路径、代码、stdout/stderr、异常文本。严格校验阶段字段的类型、范围及枚举。默认关闭时无外部上传；现有本地 exporter 继续使用自己的白名单。
+
+本地测试通过真实 Harness、读取重试策略和 VerificationRunner，使用 MockTransport 与替代沙盒验证阶段语义和净化结果；没有执行真实企业服务请求或 Docker 回归。写动作的提议/审批/派发/UNKNOWN/确认观测仍待实现，不能把只读工具 span 当作完整动作生命周期。
+
 ## 验证与待办
 
 ```bash
-.venv/bin/pytest tests/test_langfuse.py tests/test_trace_context.py -q
+.venv/bin/pytest tests/test_langfuse.py tests/test_trace_context.py tests/test_stage_observations.py -q
 env AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_trace_context.py -m integration -q
 env AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q
 ```
 
 测试使用实际锁定 SDK 的属性编码、实际 OTel span/protobuf 和 MockTransport，不需要外部凭证。覆盖线程上下文、跨租户过滤、多 exporter 数据边界、复用不重复计费、未知 usage、容量丢弃、超时关闭、平台失败/跳转/partial rejection 及 CLI 清理。Python CI 安装 langfuse extra 后执行这些测试；缺少可选 SDK 的常规环境会显式跳过此测试模块。
 
-LF-01 仍待：真实 Langfuse OTLP 联调和三类真实模型轨迹、检索/工具/沙盒阶段 observation、采样、完整项目权限与保留/删除策略、自托管服务/镜像摘要锁定、部署/断网/吞吐与 P95 性能验收。当前不能用这份基础代码宣称完成完整 LF-01，更不能宣称策略质量已经提高。
+LF-01 仍待：真实 Langfuse OTLP 联调和三类真实模型轨迹、写动作生命周期 observation、采样、完整项目权限与保留/删除策略、自托管服务/镜像摘要锁定、部署/断网/吞吐与 P95 性能验收。当前不能用这份基础代码宣称完成完整 LF-01，更不能宣称策略质量已经提高。
 
 官方依据：[SDK 与 OTel](https://langfuse.com/docs/observability/sdk/overview)、[现有 OTel 集成](https://langfuse.com/faq/all/existing-otel-setup)、[Python API 参考](https://python.reference.langfuse.com/langfuse)。实际编码以锁定 4.15.4 源码及 wire-format 测试为准。

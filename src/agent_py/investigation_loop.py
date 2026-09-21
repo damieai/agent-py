@@ -32,7 +32,9 @@ class BoundedInvestigation:
             projects=[contract["project"]],
             environments=[contract["environment"]],
         )
-        compiler = ContextCompiler(service.db, service.settings.context_strategy)
+        compiler = ContextCompiler(
+            service.db, service.settings.context_strategy, telemetry=service.telemetry
+        )
         history, bundles, queries = [], [], []
         query = contract["goal"]
         gateway = self.gateway

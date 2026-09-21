@@ -139,7 +139,9 @@ class EvidenceCollector:
                 finally:
                     client.close()
 
-            data = read_with_policy(self.service, principal, source, read, reauthorize)
+            data = read_with_policy(
+                self.service, principal, source, read, reauthorize, task_id=task_id
+            )
             payload = project_response(source.provider, data)
             body = json.dumps(
                 {

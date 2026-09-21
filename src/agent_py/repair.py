@@ -243,7 +243,11 @@ class RepairHarness:
             run = s.scalar(
                 select(RepairRun).where(RepairRun.tenant_id == tenant, RepairRun.task_id == task_id)
             )
-        compiler = ContextCompiler(self.service.db, self.service.settings.context_strategy)
+        compiler = ContextCompiler(
+            self.service.db,
+            self.service.settings.context_strategy,
+            telemetry=self.service.telemetry,
+        )
         if run is None:
             if self.service.settings.collection_manifest is not None:
                 from agent_py.collection import CollectionManifest, EvidenceCollector

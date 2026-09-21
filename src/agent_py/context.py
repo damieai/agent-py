@@ -29,9 +29,10 @@ class ContextBundle:
 class ContextCompiler:
     """ACL filtering precedes ranking. Byte budget is conservative for text-only material."""
 
-    def __init__(self, db, strategy="lexical"):
+    def __init__(self, db, strategy="lexical", *, telemetry=None):
         if strategy not in {"lexical", "bm25_rrf"}:
             raise DomainError("CONTEXT_STRATEGY", "Unknown retrieval strategy", 422)
+        self.telemetry = telemetry
         self.db = db
         self.strategy = strategy
 
@@ -46,6 +47,32 @@ class ContextCompiler:
                 raise DomainError("CONTEXT_SCOPE", "Context does not match task scope", 403)
 
     def compile(
+        self,
+        principal: Principal,
+        project: str,
+        environment: str,
+        query: str,
+        budget: int = 6000,
+        as_of: datetime | None = None,
+        task_id: str | None = None,
+    ) -> ContextBundle:
+        from agent_py.observations import stage
+
+        with stage(
+            self.telemetry,
+            "retrieval.compile",
+            principal.tenant_id,
+            task_id,
+            **{"stage.strategy": self.strategy},
+        ) as span:
+            bundle = self._compile(principal, project, environment, query, budget, as_of, task_id)
+            span.set_attribute("stage.document_count", len(bundle.documents))
+            span.set_attribute("stage.omitted_count", len(bundle.omitted))
+            span.set_attribute("stage.context_bytes", bundle.estimated_tokens)
+            span.set_attribute("stage.context_digest", bundle.digest)
+            return bundle
+
+    def _compile(
         self,
         principal: Principal,
         project: str,

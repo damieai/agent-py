@@ -138,7 +138,7 @@ def create_app(
         from agent_py.context import ContextCompiler
 
         task = service.get_task(p, task_id)
-        compiler = ContextCompiler(db, settings.context_strategy)
+        compiler = ContextCompiler(db, settings.context_strategy, telemetry=service.telemetry)
         bundle = compiler.compile(
             p,
             task.contract["project"],

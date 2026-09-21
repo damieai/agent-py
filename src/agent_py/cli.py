@@ -382,7 +382,9 @@ def context_preview(task_id: str, query: str | None = None, budget: int = 6000):
     service = build_service(get_settings())
     p = principal()
     t = service.get_task(p, task_id)
-    compiler = ContextCompiler(service.db, service.settings.context_strategy)
+    compiler = ContextCompiler(
+        service.db, service.settings.context_strategy, telemetry=service.telemetry
+    )
     bundle = compiler.compile(
         p,
         t.contract["project"],
@@ -507,7 +509,9 @@ def analyze(
     service = build_service(get_settings())
     p = principal()
     t = service.get_task(p, task_id)
-    compiler = ContextCompiler(service.db, service.settings.context_strategy)
+    compiler = ContextCompiler(
+        service.db, service.settings.context_strategy, telemetry=service.telemetry
+    )
     bundle = compiler.compile(
         p, t.contract["project"], t.contract["environment"], t.contract["goal"], task_id=task_id
     )

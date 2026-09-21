@@ -14,7 +14,7 @@
 - 受信身份与可撤销 Grant 共同授权；生产数据库运行角色不得绕过 RLS。
 - 模型只产生决策与候选动作，审批与执行在 Service 层；当前 live executor 明确拒绝外部写入。
 - 仿真外部系统独立持久化回执；本地账本并不假装能兑现第三方幂等。
-- 已选定 Langfuse 作为 LLM 观测、提示词管理与实验协作平台，直接集成现有 Python Harness；接入代码尚未实现。按 [LF-01—LF-04](langfuse.md) 推进，Temporal、动作账本与本地评测门禁的职责保持明确。
+- 已选定 Langfuse 作为 LLM 观测、提示词管理与实验协作平台，直接集成现有 Python Harness；LF-01 基础导出、跨进程关联与阶段观测已局部实现并完成本地验证，见 [实现边界](langfuse-foundation.md)。按 [LF-01—LF-04](langfuse.md) 推进，Temporal、动作账本与本地评测门禁的职责保持明确。
 
 ## API 与类型
 
@@ -232,6 +232,6 @@ AgentRelease v1 已有本地清单和运行时绑定；任务中途修订、评�
 3. 完成 LF-03 提示词快照与发布固定、LF-04 质量/成本/时延门禁，让一次策略改进有可复核的发布判断和回滚路径。LF 切片属于 B03/B07/B08/B10 的联合交付，不等待整个 B10 完成才开始。
 4. 将 B06 接入专用企业测试仓库与 Namespace，扩大 B07—B10 的真实验收；达到 B10 门槛前不开放生产自动写入。随后按对照实验收益选择 B11/B12 增强项。
 
-LF-01—LF-04 全部为 planned；完整验收矩阵见 [Langfuse 接入与 Agent 效果优化](langfuse.md)。
+LF-01 为 partially implemented / locally verified，真实平台与生产验收未完成；LF-02—LF-04 为 planned。完整验收矩阵见 [Langfuse 接入与 Agent 效果优化](langfuse.md)。
 
 当前缺少企业账号/测试环境、模型付费配置、可工作的 Docker 以及 GPU。没有使用这些依赖，也没有发送企业消息、创建真实 PR 或进行真实发布。

@@ -254,6 +254,7 @@ def read_with_policy(
     read,
     authorize,
     *,
+    task_id=None,
     sleep=time.sleep,
     monotonic=time.monotonic,
     jitter=random.uniform,
@@ -273,7 +274,16 @@ def read_with_policy(
                 outcome = "failure"
                 raise TransientReadError("UPSTREAM_RETRY_BUDGET")
             try:
-                result = read()
+                from agent_py.observations import stage
+
+                with stage(
+                    service.telemetry,
+                    "tool.read",
+                    principal.tenant_id,
+                    task_id,
+                    **{"stage.provider": source.provider, "stage.attempt": attempt + 1},
+                ):
+                    result = read()
                 validate_permit(service, permit)
                 authorize()
                 outcome = "success"

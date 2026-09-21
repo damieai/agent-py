@@ -1,6 +1,6 @@
 # Langfuse 接入与 Agent 效果优化
 
-状态：**planned**。2026-09-20 确定接入方向；本文是待实施契约，当前仓库没有 Langfuse SDK、部署配置或已完成的联调。本轮不启用外部数据上传。后续交付分别记录 implemented、verified、operated 及证据。
+状态：**LF-01 partially implemented / locally verified；LF-02—LF-04 planned**。2026-09-20 确定接入方向。已实现可选 SDK/OTLP 元数据导出、跨进程关联及检索/只读工具/沙盒阶段观测，见 [基础接入与验证边界](langfuse-foundation.md)。默认不启用外部上传；真实 Langfuse、真实模型和生产部署验收尚未完成。下文保留完整目标契约，不将局部实现等同于整体验收。
 
 ## 目标与交付能力
 
