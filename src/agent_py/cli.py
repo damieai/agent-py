@@ -695,3 +695,41 @@ def release_verify(
         typer.echo(f"{exc.code}: {exc.message}", err=True)
         raise typer.Exit(1) from None
     typer.echo(json.dumps(result))
+
+
+@app.command()
+def experiment_freeze(source: Path, output: Path):
+    """Validate split isolation and freeze a local, content-addressed retrieval dataset."""
+    from agent_py.experiment_datasets import freeze_dataset
+
+    try:
+        snapshot = freeze_dataset(source, output)
+    except (ValueError, OSError):
+        raise typer.BadParameter(
+            "Dataset invalid or output unavailable; no existing snapshot overwritten"
+        ) from None
+    typer.echo(f"Frozen dataset: {snapshot.content_digest}; cases: {len(snapshot.dataset.cases)}")
+
+
+@app.command()
+def experiment_run(
+    snapshot: Path,
+    output: Path,
+    split: str = "development",
+    repeats: int = 1,
+    resume: bool = False,
+):
+    """Run or resume an isolated offline none/lexical/BM25-RRF comparison; no model calls."""
+    from agent_py.retrieval_experiments import run_experiment
+
+    try:
+        report = run_experiment(snapshot, output, split=split, repeats=repeats, resume=resume)
+    except (ValueError, OSError):
+        raise typer.BadParameter(
+            "Experiment configuration, evidence or run directory is invalid"
+        ) from None
+    typer.echo(
+        f"Execution: {report['execution_status']}; retrieval only; report: {output / 'report.json'}"
+    )
+    if report["execution_status"] != "COMPLETE":
+        raise typer.Exit(1)

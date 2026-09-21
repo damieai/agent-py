@@ -1,0 +1,145 @@
+{
+  "schema_version": 1,
+  "name": "authored-retrieval-experiment-v1",
+  "provenance": "synthetic",
+  "cases": [
+    {
+      "id": "case-1",
+      "split": "development",
+      "entity_group": "worker-alpha",
+      "template_family": "leases-a",
+      "query": "Expired worker lease cancels remote call?",
+      "documents": [
+        {
+          "id": "reference",
+          "source": "fixture://worker-alpha",
+          "body": "An expired worker lease fences new dispatch but cannot cancel an in-flight remote request."
+        },
+        {
+          "id": "distractor",
+          "source": "fixture://unrelated",
+          "body": "The cafeteria serves lunch at noon."
+        }
+      ],
+      "relevant": [
+        "reference"
+      ],
+      "context_budget": 3000
+    },
+    {
+      "id": "case-2",
+      "split": "development",
+      "entity_group": "budget-beta",
+      "template_family": "billing-b",
+      "query": "Unknown model response budget release",
+      "documents": [
+        {
+          "id": "reference",
+          "source": "fixture://budget-beta",
+          "body": "A lost model response preserves the paid reservation and forbids blind retry."
+        },
+        {
+          "id": "distractor",
+          "source": "fixture://unrelated",
+          "body": "The cafeteria serves lunch at noon."
+        }
+      ],
+      "relevant": [
+        "reference"
+      ],
+      "context_budget": 3000
+    },
+    {
+      "id": "case-3",
+      "split": "calibration",
+      "entity_group": "tenant-gamma",
+      "template_family": "database-c",
+      "query": "Postgres tenant isolation",
+      "documents": [
+        {
+          "id": "reference",
+          "source": "fixture://tenant-gamma",
+          "body": "FORCE ROW LEVEL SECURITY and a non-owner runtime role enforce tenant database boundaries."
+        },
+        {
+          "id": "distractor",
+          "source": "fixture://unrelated",
+          "body": "The cafeteria serves lunch at noon."
+        }
+      ],
+      "relevant": [
+        "reference"
+      ],
+      "context_budget": 3000
+    },
+    {
+      "id": "case-4",
+      "split": "calibration",
+      "entity_group": "approval-delta",
+      "template_family": "authorization-d",
+      "query": "Approval expires before dispatch",
+      "documents": [
+        {
+          "id": "reference",
+          "source": "fixture://approval-delta",
+          "body": "Approval binds an immutable action payload digest and must still be valid at dispatch."
+        },
+        {
+          "id": "distractor",
+          "source": "fixture://unrelated",
+          "body": "The cafeteria serves lunch at noon."
+        }
+      ],
+      "relevant": [
+        "reference"
+      ],
+      "context_budget": 3000
+    },
+    {
+      "id": "case-5",
+      "split": "holdout",
+      "entity_group": "service-epsilon",
+      "template_family": "rollback-e",
+      "query": "Rollback image and resource revision",
+      "documents": [
+        {
+          "id": "reference",
+          "source": "fixture://service-epsilon",
+          "body": "A rollback requires a pinned image digest and an expected resource revision."
+        },
+        {
+          "id": "distractor",
+          "source": "fixture://unrelated",
+          "body": "The cafeteria serves lunch at noon."
+        }
+      ],
+      "relevant": [
+        "reference"
+      ],
+      "context_budget": 3000
+    },
+    {
+      "id": "case-6",
+      "split": "holdout",
+      "entity_group": "webhook-zeta",
+      "template_family": "notification-f",
+      "query": "Duplicate webhook event delivery",
+      "documents": [
+        {
+          "id": "reference",
+          "source": "fixture://webhook-zeta",
+          "body": "An inbox deduplicates webhook delivery identifiers before authoritative reconciliation."
+        },
+        {
+          "id": "distractor",
+          "source": "fixture://unrelated",
+          "body": "The cafeteria serves lunch at noon."
+        }
+      ],
+      "relevant": [
+        "reference"
+      ],
+      "context_budget": 3000
+    }
+  ]
+}
