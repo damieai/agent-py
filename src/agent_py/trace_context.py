@@ -7,12 +7,15 @@ from opentelemetry.trace import Link, SpanContext, TraceFlags, TraceState
 from sqlalchemy import select
 
 from agent_py.db import Task, TaskTrace, tenant_get
+from agent_py.observation_policy import selected
 
 PATTERN = re.compile(r"00-([a-f0-9]{32})-([a-f0-9]{16})-(00|01)")
 ROLES = frozenset({"origin", "dispatch", "previous"})
 
 
-def enabled(service, tenant):
+def enabled(service, tenant, task_id=None):
+    if task_id is not None:
+        return selected(service.settings, tenant, task_id)
     return service.settings.langfuse_enabled and service.settings.langfuse_tenant == tenant
 
 
@@ -48,12 +51,12 @@ def row_for(s, tenant, task_id):
 
 
 def record_origin(service, s, task):
-    if enabled(service, task.tenant_id):
+    if enabled(service, task.tenant_id, task.id):
         s.add(TaskTrace(tenant_id=task.tenant_id, task_id=task.id, origin=pack()))
 
 
 def read_links(service, tenant, task_id, carrier=None):
-    if not enabled(service, tenant):
+    if not enabled(service, tenant, task_id):
         return []
     try:
         with service.db.session(tenant) as s:
@@ -77,7 +80,7 @@ def read_links(service, tenant, task_id, carrier=None):
 
 
 def record_segment(service, tenant, task_id, context, *, dispatch=False):
-    if not enabled(service, tenant) or not pack(context):
+    if not enabled(service, tenant, task_id) or not pack(context):
         return None
     try:
         with service.db.session(tenant) as s:

@@ -36,3 +36,7 @@ browser-test:
 .PHONY: recovery-check
 recovery-check:
 	.venv/bin/python scripts/check_recovery.py
+
+.PHONY: langfuse-check
+langfuse-check:
+	.venv/bin/python scripts/check_langfuse.py

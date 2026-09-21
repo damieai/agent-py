@@ -233,7 +233,9 @@ def test_sanitization_failure_drops_and_does_not_raise(monkeypatch):
         processor, "sanitize", lambda _: (_ for _ in ()).throw(ValueError("SECRET"))
     )
     try:
-        with provider.get_tracer("agent-py").start_as_current_span("model.generation"):
+        with provider.get_tracer("agent-py").start_as_current_span(
+            "model.generation", attributes={"tenant.id": "t1", "task.id": "fixture"}
+        ):
             pass
         assert counter.labels("sanitization_failed")._value.get() == 1
     finally:

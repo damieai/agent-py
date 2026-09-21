@@ -1,8 +1,5 @@
 """Opt-in metadata-only Langfuse OTLP adapter; no global instrumentation or business retries."""
 
-import hashlib
-import hmac
-import json
 import queue
 import re
 import threading
@@ -12,6 +9,8 @@ import httpx
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
+
+from agent_py.observation_policy import pseudonym, selected
 
 NAMES = {"task.accepted", "task.dispatch", "worker.tick", "model.generation", "model.result_reused"}
 STAGES = {
@@ -81,25 +80,25 @@ class LangfuseProcessor(SpanProcessor):
         self.thread.start()
 
     def pseudonym(self, tenant, category, identifier):
-        message = json.dumps([self.settings.environment, tenant, category, identifier]).encode()
-        return hmac.new(
-            self.settings.langfuse_pseudonym_key.get_secret_value().encode(),
-            message,
-            hashlib.sha256,
-        ).hexdigest()
+        return pseudonym(self.settings, tenant, category, identifier)
 
-    def sanitize(self, span):
+    def eligible(self, span):
         attrs = span.attributes or {}
         tenant, task = attrs.get("tenant.id"), attrs.get("task.id")
-        if (
-            span.name not in NAMES | STAGES.keys()
-            or tenant != self.settings.langfuse_tenant
-            or not isinstance(task, str)
-            or len(task) > 160
-            or not span.instrumentation_scope
-            or span.instrumentation_scope.name != "agent-py"
-        ):
+        return (
+            span.name in NAMES | STAGES.keys()
+            and tenant == self.settings.langfuse_tenant
+            and isinstance(task, str)
+            and 0 < len(task) <= 160
+            and span.instrumentation_scope is not None
+            and span.instrumentation_scope.name == "agent-py"
+        )
+
+    def sanitize(self, span):
+        if not self.eligible(span):
             return None
+        attrs = span.attributes or {}
+        tenant, task = attrs["tenant.id"], attrs["task.id"]
         metadata = {"tenant": self.pseudonym(tenant, "tenant", tenant)}
         if span.name in OPERATIONS:
             identifier = attrs.get("operation.id")
@@ -199,6 +198,13 @@ class LangfuseProcessor(SpanProcessor):
 
     def on_end(self, span):
         try:
+            if not self.eligible(span):
+                self.counter.labels("filtered").inc()
+                return
+            attrs = span.attributes
+            if not selected(self.settings, attrs["tenant.id"], attrs["task.id"]):
+                self.counter.labels("sampled_out").inc()
+                return
             safe = self.sanitize(span)
             if safe is None:
                 self.counter.labels("filtered").inc()

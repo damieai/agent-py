@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     langfuse_queue_size: int = Field(default=256, ge=1, le=4096)
     langfuse_timeout_seconds: float = Field(default=2, gt=0, le=10)
     langfuse_flush_seconds: float = Field(default=3, ge=0, le=10)
+    langfuse_sample_rate: float = Field(default=1, ge=0, le=1, allow_inf_nan=False)
     audit_signing_manifest: Path | None = None
     context_strategy: Literal["lexical", "bm25_rrf"] = "lexical"
     worker_metrics_enabled: bool = False

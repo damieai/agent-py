@@ -1,6 +1,16 @@
 image: python:3.12-slim
 pipelines:
   custom:
+    langfuse-local-probe:
+      - step:
+          name: Langfuse loopback export fault and overhead probe
+          max-time: 10
+          script:
+            - pip install uv==0.12.17
+            - uv sync --extra dev --extra langfuse --frozen
+            - .venv/bin/python scripts/check_langfuse.py
+          artifacts:
+            - .runtime/langfuse/**
     recovery-drill:
       - step:
           name: Native worker process recovery drill

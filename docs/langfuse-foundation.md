@@ -1,6 +1,6 @@
 # Langfuse 基础接入（LF-01 的首个切片）
 
-状态：**implemented，SDK/OTLP MockTransport verified**。这是更新计划中 LF-01 的部分实现，不是 LF-01 整体验收。尚未连接真实 Langfuse、调用付费模型、部署自托管组件或完成开销实测；LF-02—LF-04 未实现。
+状态：**implemented，SDK/OTLP MockTransport verified**。这是更新计划中 LF-01 的部分实现，不是 LF-01 整体验收。尚未连接真实 Langfuse、调用付费模型、部署自托管组件或完成生产开销验收；已新增隔离 loopback HTTP 的本地探索性开销测量；LF-02—LF-04 未实现。
 
 ## 已有能力
 
@@ -29,6 +29,7 @@ AGENT_LANGFUSE_PSEUDONYM_KEY=INDEPENDENT_RANDOM_SECRET_AT_LEAST_32_CHARACTERS
 AGENT_LANGFUSE_QUEUE_SIZE=256
 AGENT_LANGFUSE_TIMEOUT_SECONDS=2
 AGENT_LANGFUSE_FLUSH_SECONDS=3
+AGENT_LANGFUSE_SAMPLE_RATE=1
 ```
 
 端点必须是 HTTPS origin，不接受 URL 凭证、路径、查询或 fragment；development/test 可使用 loopback HTTP。生产不得降级 HTTP。安装缺失 SDK 或启用时配置缺失会在启动阶段失败；运行中的网络故障则仅影响遥测。
@@ -49,7 +50,7 @@ tenant、task session、推理身份使用独立密钥的 HMAC-SHA256 伪名，�
 
 请求 I/O timeout 默认 2 秒，关闭最多等待 3 秒后丢弃剩余队列；在途 daemon 线程可能继续至 I/O 结束。该 timeout 不是网络请求的绝对墙钟终止保证。正常 CLI 退出、API lifespan 和 Worker shutdown 关闭 provider；SIGKILL 可能丢失未导出数据，禁止重跑业务来补 trace。
 
-Prometheus 指标 `agent_langfuse_spans_total{result=...}` 包含 `queued`、`exported`、`filtered`、`dropped`、`sanitization_failed`、`export_failed`、`correlation_failed`。`exported` 只表示接收端返回成功 OTLP 应答，不证明平台页面已经完整可见。没有把任务/租户 ID 放入新增指标标签。
+Prometheus 指标 `agent_langfuse_spans_total{result=...}` 包含 `queued`、`exported`、`filtered`、`dropped`、`sanitization_failed`、`export_failed`、`correlation_failed`、`sampled_out`。`exported` 只表示接收端返回成功 OTLP 应答，不证明平台页面已经完整可见。没有把任务/租户 ID 放入新增指标标签。
 
 ## 跨进程执行段关联
 
@@ -97,6 +98,26 @@ Dispatcher 保存首次派发的 traceparent，通过 Temporal workflow/activity
 
 执行模式来自服务配置，不是外部能力认证。当前测试使用本地持久化 SimulatedSystem，包含响应丢失、回执滞后、并发 CAS、审批重试、无效回执及落账失败；未认证的 live 写适配器仍在派发前拒绝。真实企业写动作验收、人工升级/取消/补偿的完整观测以及平台展示仍未完成。
 
+## 任务级采样与本地导出验收
+
+`AGENT_LANGFUSE_SAMPLE_RATE` 范围为 0—1，默认 1。按环境、租户、任务 ID 与独立伪名密钥计算确定性 HMAC，决定整个任务的导出选择。同一配置下跨进程、重启和新的 trace ID 保持一致；不是逐 span 随机采样，也不是 OTel provider 的全局采样器，因此不影响其他 exporter。采样决定先于净化/SDK 编码/入队，未选中的任务不写 `task_traces`；仍会创建普通 OTel span，不能理解为关闭全部埋点开销。
+
+API、Dispatcher、Worker 必须使用相同采样率、环境和伪名密钥。修改采样率或轮换密钥会改变在途任务的选择，可能出现断链；当前未将采样策略固定到任务版本。rate=0 停止新导出与关联写入，但不删除历史数据，也不撤回已在队列中的数据。失败任务没有额外 tail sampling 保留策略。固定实验必须配置 rate=1，并独立核对预期记录是否完整；采样指标不能证明实验完整，更不能据采样成本推算实际总账单。
+
+本地复现实验：
+
+```bash
+make langfuse-check
+# 指定样本数/重复次数；性能上限须在运行前给定，单位为新增 P95 毫秒
+.venv/bin/python scripts/check_langfuse.py --tasks 40 --repeats 3 --max-added-p95-ms 10
+```
+
+脚本为每个场景创建新进程、临时数据库与本地模拟权威，清除继承的 AGENT 配置，固定 loopback HTTP 和假凭证。覆盖关闭、正常导出、50% 任务采样、HTTP 503、阻塞端点/队列满五种场景；按轮次轮换顺序。使用真实 HTTPX、OTLP protobuf 和接收线程，不连接真实 Langfuse、不调用模型。每个任务执行创建、提议和模拟 create_pr，并核对只发生一次副作用。
+
+报告存放在 `.runtime/langfuse/run-*/report.json`，包含源码/锁文件摘要、逐任务墙钟延迟、P50/P95、吞吐、工作负载 CPU 时间、进程峰值 RSS、关闭耗时及导出/失败/丢弃计数。缺失子进程结果、净化泄漏、业务结果变化、队列未排空、未触发预期故障都会使 correctness=FAIL 并返回非零。只有显式传入预设上限才计算 performance=PASS/FAIL；默认 NOT_ASSESSED，不将功能通过冒充性能通过。Bitbucket 自定义 `langfuse-local-probe` 流程保留报告。
+
+这属于小样本本地探索：包含 SDK/解释器启动内存、没有剔除预热、没有置信区间，也没有控制宿主机其他负载；CPU 仅测主动任务阶段，RSS 为整个子进程峰值。此处 P95 是创建/提议/执行三个同步方法的合计耗时，不能替代真实 API/Temporal/模型的端到端性能。2026-09-21 三轮各 40 任务实测：关闭 P95 11.74—19.03 ms，正常导出 P95 26.51—42.94 ms，阻塞场景每轮丢弃 113 条，功能检查通过；未预设性能阈值，不能据此宣布生产验收通过。异步导出仍有可测开销，后续应评估批量发送与生产负载下的队列容量。
+
 ## 验证与待办
 
 ```bash
@@ -107,6 +128,6 @@ env AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q
 
 测试使用实际锁定 SDK 的属性编码、实际 OTel span/protobuf 和 MockTransport，不需要外部凭证。覆盖线程上下文、跨租户过滤、多 exporter 数据边界、复用不重复计费、未知 usage、容量丢弃、超时关闭、平台失败/跳转/partial rejection 及 CLI 清理。Python CI 安装 langfuse extra 后执行这些测试；缺少可选 SDK 的常规环境会显式跳过此测试模块。
 
-LF-01 仍待：真实 Langfuse OTLP 联调和三类真实模型轨迹、人工升级/取消/补偿 observation、采样、完整项目权限与保留/删除策略、自托管服务/镜像摘要锁定、部署/断网/吞吐与 P95 性能验收。当前不能用这份基础代码宣称完成完整 LF-01，更不能宣称策略质量已经提高。
+LF-01 仍待：真实 Langfuse OTLP 联调和三类真实模型轨迹、人工升级/取消/补偿 observation、完整项目权限与保留/删除策略、自托管服务/镜像摘要锁定、部署/断网/吞吐与 P95 性能验收。当前不能用这份基础代码宣称完成完整 LF-01，更不能宣称策略质量已经提高。
 
 官方依据：[SDK 与 OTel](https://langfuse.com/docs/observability/sdk/overview)、[现有 OTel 集成](https://langfuse.com/faq/all/existing-otel-setup)、[Python API 参考](https://python.reference.langfuse.com/langfuse)。实际编码以锁定 4.15.4 源码及 wire-format 测试为准。
