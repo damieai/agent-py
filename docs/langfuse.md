@@ -1,6 +1,6 @@
 # Langfuse 接入与 Agent 效果优化
 
-状态：**LF-01 partially implemented / locally verified；LF-02 offline retrieval foundation implemented；LF-03—LF-04 planned**。2026-09-20 确定接入方向。已实现可选 SDK/OTLP 元数据导出、跨进程关联、检索/只读工具/沙盒阶段及写动作生命周期、人工控制观测，见 [基础接入与验证边界](langfuse-foundation.md)。已提供默认离线、需显式启用联网的合成平台回读诊断入口，以及[独立自托管配置](langfuse-selfhost.md)（镜像摘要锁定、凭证初始化、Compose 解析已验证，容器启动待验收）。已补齐调查停止摘要、轮次、候选与验证重试身份及 Worker 等待原因；三类工作流本地验收 v2 覆盖这些字段、正常/关闭/拒绝导出及 Service 重建复用。默认不启用外部上传；真实 Langfuse、真实模型和生产部署验收尚未完成。LF-02 已提供[冻结数据集与可恢复检索对照](retrieval-experiments.md)，不依赖平台完成验收；模型/人工/judge 与平台实验仍待接入。下文保留完整目标契约，不将局部实现等同于整体验收。
+状态：**LF-01 partially implemented / locally verified；LF-02 offline retrieval foundation implemented；LF-03—LF-04 planned**。2026-09-20 确定接入方向。已实现可选 SDK/OTLP 元数据导出、跨进程关联、检索/只读工具/沙盒阶段及写动作生命周期、人工控制观测，见 [基础接入与验证边界](langfuse-foundation.md)。已提供默认离线、需显式启用联网的合成平台回读诊断入口，以及[独立自托管配置](langfuse-selfhost.md)（镜像摘要锁定、凭证初始化、Compose 解析已验证，容器启动待验收）。已补齐调查停止摘要、轮次、候选与验证重试身份及 Worker 等待原因；三类工作流本地验收 v2 覆盖这些字段、正常/关闭/拒绝导出及 Service 重建复用。默认不启用外部上传；真实 Langfuse、真实模型和生产部署验收尚未完成。LF-02 已提供[冻结数据集、可恢复检索对照及审计/失败用例导入](retrieval-experiments.md)，不依赖平台完成验收；模型/人工/judge 与平台实验仍待接入。下文保留完整目标契约，不将局部实现等同于整体验收。
 
 ## 目标与交付能力
 

@@ -3,7 +3,7 @@ pipelines:
   custom:
     retrieval-experiment:
       - step:
-          name: Frozen offline retrieval experiment and resume
+          name: Frozen retrieval experiment, resume and independent audit
           max-time: 10
           script:
             - pip install uv==0.12.17
@@ -11,6 +11,7 @@ pipelines:
             - .venv/bin/agent-py experiment-freeze examples/retrieval-experiment.json .runtime/experiments/dataset.json
             - .venv/bin/agent-py experiment-run .runtime/experiments/dataset.json .runtime/experiments/development --repeats 2
             - .venv/bin/agent-py experiment-run .runtime/experiments/dataset.json .runtime/experiments/development --repeats 2 --resume
+            - .venv/bin/agent-py experiment-audit .runtime/experiments/development .runtime/experiments/development-audit.json
           artifacts:
             - .runtime/experiments/**
     langfuse-trajectory-rehearsal:

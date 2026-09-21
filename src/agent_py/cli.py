@@ -733,3 +733,35 @@ def experiment_run(
     )
     if report["execution_status"] != "COMPLETE":
         raise typer.Exit(1)
+
+
+@app.command()
+def experiment_audit(run: Path, output: Path, expected_evidence_digest: str | None = None):
+    """Verify archived evidence and recompute retrieval metrics without rerunning jobs."""
+    from agent_py.experiment_datasets import publish_json
+    from agent_py.experiment_review import audit_experiment
+
+    try:
+        if output.resolve().is_relative_to(run.resolve()):
+            raise ValueError("Audit output must be outside the source archive")
+        report = audit_experiment(run, expected_evidence_digest=expected_evidence_digest)
+        publish_json(output, report)
+    except (ValueError, OSError):
+        raise typer.BadParameter("Archive evidence or audit output is invalid") from None
+    typer.echo(f"Audit: {report['audit_status']}; report: {output}")
+    if report["audit_status"] != "COMPLETE":
+        raise typer.Exit(1)
+
+
+@app.command()
+def experiment_curate(run: Path, review: Path, output: Path):
+    """Freeze explicitly reviewed development failures with immutable source lineage."""
+    from agent_py.experiment_review import curate_experiment
+
+    try:
+        if output.resolve().is_relative_to(run.resolve()):
+            raise ValueError("Curation output must be outside the source archive")
+        lineage = curate_experiment(run, review, output)
+    except (ValueError, OSError):
+        raise typer.BadParameter("Curation evidence, review or output is invalid") from None
+    typer.echo(f"Curated dataset: {lineage['output_dataset_digest']}; directory: {output}")

@@ -51,7 +51,62 @@ run 目录包含：
 
 `--resume` 只运行没有已发布记录的 job；已完成或已失败记录都不自动重跑。这里允许重做的是无外部副作用的纯检索计算，不是未决付费模型调用；以后接模型时必须另接推理账本和预算预留。明确失败保存固定 EXECUTION_FAILED，不保存异常文本。修正失败需建新 run，保留旧结果供分析。断电/强杀时 report.json 可能滞后于逐项账本，恢复会重新计算。
 
-report.json 不是信任根。消费结果前，应以原计划运行 `--resume` 完整核验记录；单独读取旧 COMPLETE 不能证明现存证据完整，也不能证明实验质量达标。
+report.json 不是信任根。消费结果前使用下述 `experiment-audit` 独立核验；需要继续未完成任务时才使用原计划的 `--resume`。单独读取旧 COMPLETE 不能证明现存证据完整，也不能证明实验质量达标。
+
+## 历史证据独立审计
+
+```bash
+.venv/bin/agent-py experiment-audit .runtime/experiments/development .runtime/experiments/development-audit.json
+# 已在独立位置保存摘要时，额外固定整份证据，防止数据和内部摘要一起被替换
+.venv/bin/agent-py experiment-audit .runtime/experiments/development .runtime/experiments/development-pinned-audit.json --expected-evidence-digest YOUR_SAVED_SHA256
+```
+
+审计读取归档中的实现身份，不要求它等于当前源码，因此升级代码后仍可复核旧实验。它不创建数据库、不执行检索、不调用模型/平台，也不修改源目录；必须读取既有 `.lock` 并取得共享锁，正在写入的实验会被拒绝。仅适用于本地 POSIX 文件系统；锁防护遵守协议的写者，不能抵御有权限绕过锁修改文件的操作者。
+
+审计重新校验数据集、计划、实现身份摘要、全部 job 身份/摘要/文档范围/预算，然后从原始记录重算指标。它不信任旧 report 的 COMPLETE 和分数：
+
+- 原始证据损坏、存在未知记录、证据文件为符号链接或独立摘要 pin 不匹配：拒绝，不产出有效审计报告。
+- 旧汇总丢失、无法读取或与重算不一致（包括原先的 INVALID）：`audit_status=REPORT_MISMATCH`，输出重算结果供检查，CLI 非零；不自动修复旧汇总。
+- 汇总一致但存在失败/未完成：`audit_status=INCOMPLETE`，CLI 非零。
+- 汇总一致且全部任务完成：`audit_status=COMPLETE`。这仍不代表模型质量或发布门槛通过。
+
+`evidence_digest` 覆盖冻结数据集、完整计划及按 job 摘要索引的记录清单；缺失记录以 null 入摘要。它不包含可重建的 report，也不依赖绝对路径。可把首次审计的摘要另存到独立可信位置，再通过 `--expected-evidence-digest` 固定。没有独立 pin 或签名时，内部哈希只能检查一致性，不能证明执行真实发生，也不能抵御所有内容及哈希同时重写。归档未保存 context 正文，所以这里只校验 context digest 的格式及 none 基线约束，不能重建正文验证该摘要。评分算法采用当前审计器的 v1 实现；未来变更应显式升级协议。
+
+输出必须位于源归档目录之外、不可覆盖已有文件，权限 0600。审计报告不复制 query/document 正文，包含独立重算指标、证据摘要及 review_queue。待审核项只包括 lexical/BM25-RRF 的显式执行失败或 Recall 小于 1，保留具体 job/策略/repeat/原因；none 的预期低分不作为失败来源。队列只是调查线索，失败也可能来自错误参考标签，不能直接作为训练集。
+
+## 人工确认后导入开发用例
+
+此入口支持已有**离线检索 development 案例**的失败子集整理。暂不导入真实任务轨迹，不生成模型答案评分，也不允许将 calibration/holdout 失败复制到开发集。
+
+先查看审计队列，在授权范围内检查源案例的文本、标签和分组，再手工创建独立审核文件，例如：
+
+```json
+{
+  "format": "agent-experiment-curation/v1",
+  "evidence_digest": "替换为本次审计的64位摘要",
+  "dataset_name": "reviewed-retrieval-failures-v1",
+  "decisions": [
+    {
+      "case_id": "替换为队列中的development案例ID",
+      "reviewer": "reviewer-01",
+      "rubric_version": "relevance-review-v1",
+      "reference_verified": true,
+      "redaction_verified": true
+    }
+  ]
+}
+```
+
+```bash
+.venv/bin/agent-py experiment-curate .runtime/experiments/development .runtime/experiments/review.json .runtime/experiments/curated-v1
+.venv/bin/agent-py experiment-run .runtime/experiments/curated-v1/dataset.json .runtime/experiments/curated-run-v1
+```
+
+审核文件使用严格 schema；两项确认必须为 JSON true，审核人和规则版本使用非敏感标识。执行时重新审计整个源归档，要求摘要未变化、旧汇总与重算一致、源 split 为 development、选中案例确有非 none 失败。明确 EXECUTION_FAILED 可进入审核；缺失 job 本身不算失败，缺失导致旧汇总不一致时必须先处理源实验。没有审核或摘要过期就拒绝，绝不自动将队列全部入库。
+
+新目录包含冻结 `dataset.json`、`lineage.json` 和最后写入的 `complete.json`。lineage 记录源数据集/实现/整份证据摘要、审核内容与摘要、对应失败 job 和目标数据集摘要；complete 固定目标数据集与 lineage 摘要。每个文件私有、原子、不可覆盖；中途失败可能留下未完成目录，缺少 complete 不应作为完成的审核包交付，应保留现场并使用新的输出路径。
+
+选中案例的输入、参考标签、entity_group、template_family 和 ID 全部保持原样，冻结时再次检查精确重复与分组约束。它是带出处的开发失败子集，不增加独立样本量；重新评测这个已观察子集不能当作无偏 holdout 改善证据。此入口不负责合并其他数据集或自动修正标签。审核人身份及去敏/参考核验是操作者声明，尚无认证、双人裁决、语义去重或真实轨迹权限证明；不应将它描述为已完成 LF-02 人工评分系统。
 
 ## 指标与解释边界
 
@@ -69,14 +124,16 @@ job P50/P95 包含一次临时数据库建库、文档装载、编译、校验�
 - langfuse=NOT_UPLOADED
 - 配对结果 assessment=EXPLORATORY
 
-不生成模型成功率、人工接管率、judge 分数或模型费用，不用检索 Recall 冒充最终答案质量，也不把新报告塞进旧 evaluation gate。LF-02 后续仍需预算约束的调查/修复实验、人工标注校准、评分来源、失败入库和平台关联；LF-04 再定义可验证的新发布门禁。
+不生成模型成功率、人工接管率、judge 分数或模型费用，不用检索 Recall 冒充最终答案质量，也不把新报告塞进旧 evaluation gate。LF-02 后续仍需预算约束的调查/修复实验、人工标注校准、评分来源、真实轨迹失败入库和平台关联；LF-04 再定义可验证的新发布门禁。
 
 ## 验证
 
 ```bash
-.venv/bin/pytest tests/test_retrieval_experiments.py -q
+.venv/bin/pytest tests/test_retrieval_experiments.py tests/test_experiment_review.py -q
 ```
 
 测试覆盖真实检索对照、CLI 的冻结/运行/恢复、宿主设置隔离、标签不进入检索上下文、分组泄漏、快照/结果篡改、无效引用、失败保留、中断恢复、单写者锁、实现变化及按案例而非重复次数统计。Bitbucket 自定义 `retrieval-experiment` 只使用仓库合成样例，并保存输入快照与逐项报告。
 
 2026-09-21 本地执行冻结 → 开发集两次重复 → 恢复复核，12/12 job 完成，0 失败。报告为 `.runtime/experiments/development-final/report.json`。两个合成案例上 none Recall=0，lexical 与 BM25/RRF 均为 1，候选相对 lexical 的 Recall 差值为 0；仅两个实体组，不输出置信区间，不能据此声称候选提升或生产质量达标。
+
+2026-09-21 新增历史审计与失败整理验收：当前审计器直接读取上一版 `.runtime/experiments/development-final`，12 项旧记录重算一致，报告为 `.runtime/experiments/development-final-audit-v2.json`；没有调用旧实现或恢复执行。另将合成开发案例的 context_budget 设为 1，使用实际 ContextCompiler 运行 6 项任务，得到两个待审核案例、四项非 none 的 RECALL_SHORTFALL，见 `.runtime/experiments/review-shortfall-audit.json`。此故障样例仅用于验证检测流程，不作为策略效果证据；未冒充真实人工审核。新增 28 项测试覆盖独立 pin、归档篡改、报告滞后、只读与锁、审核及分组约束、不可覆盖和来源留存；全量回归 687 passed、10 skipped（另有两项第三方弃用警告）。
