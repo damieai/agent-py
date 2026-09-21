@@ -29,6 +29,7 @@ pipelines:
           - uv sync --extra dev --extra langfuse --frozen
           - .venv/bin/ruff check .
           - .venv/bin/ruff format --check .
+          - .venv/bin/python scripts/langfuse_stack.py check
           - mkdir -p .runtime
           - AGENT_DATABASE_URL=sqlite:///.runtime/ci-migrations.db .venv/bin/alembic upgrade head
           - AGENT_DATABASE_URL=sqlite:///.runtime/ci-migrations.db .venv/bin/alembic check

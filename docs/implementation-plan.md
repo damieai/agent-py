@@ -14,7 +14,7 @@
 - 受信身份与可撤销 Grant 共同授权；生产数据库运行角色不得绕过 RLS。
 - 模型只产生决策与候选动作，审批与执行在 Service 层；当前 live executor 明确拒绝外部写入。
 - 仿真外部系统独立持久化回执；本地账本并不假装能兑现第三方幂等。
-- 已选定 Langfuse 作为 LLM 观测、提示词管理与实验协作平台，直接集成现有 Python Harness；LF-01 基础导出、跨进程关联与阶段观测已局部实现并完成本地验证，见 [实现边界](langfuse-foundation.md)。按 [LF-01—LF-04](langfuse.md) 推进，Temporal、动作账本与本地评测门禁的职责保持明确。
+- 已选定 Langfuse 作为 LLM 观测、提示词管理与实验协作平台，直接集成现有 Python Harness；LF-01 基础导出、跨进程关联与阶段观测已局部实现并完成本地验证，见 [实现边界](langfuse-foundation.md)；[独立自托管配置](langfuse-selfhost.md)已完成摘要锁定和离线/Compose 解析验证，容器与真实回读待验收。按 [LF-01—LF-04](langfuse.md) 推进，Temporal、动作账本与本地评测门禁的职责保持明确。
 
 ## API 与类型
 

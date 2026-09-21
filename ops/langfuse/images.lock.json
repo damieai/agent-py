@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "resolved_at": "2026-09-21",
+  "langfuse_version": "4.38.0",
+  "upstream_commit": "4ecaabed8d9c39d0d3ba483f02ba1cca020388a9",
+  "upstream_compose_sha256": "d373385b2ad54d11c4d26a66c70ee7eaab87c7088adeb6a017c6612143efc697",
+  "images": {
+    "web": {
+      "image": "docker.io/langfuse/langfuse:4.38.0@sha256:47ef2f121e2959c8458c209d118949ade25778017e3f5b75b1e45f72276811c3",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ]
+    },
+    "worker": {
+      "image": "docker.io/langfuse/langfuse-worker:4.38.0@sha256:8631cf429efc4a2981d4e6ced4c005b9f6f620a4e34625baf60152301ec6d006",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ]
+    },
+    "postgres": {
+      "image": "docker.io/library/postgres:17@sha256:f4c66b820c6f974249089d3d16d86a3698eae11e8746eb6644b2271031e91232",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "unknown",
+          "os": "unknown"
+        },
+        {
+          "architecture": "arm",
+          "os": "linux",
+          "variant": "v5"
+        },
+        {
+          "architecture": "unknown",
+          "os": "unknown"
+        },
+        {
+          "architecture": "arm",
+          "os": "linux",
+          "variant": "v7"
+        },
+        {
+          "architecture": "unknown",
+          "os": "unknown"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux",
+          "variant": "v8"
+        },
+        {
+          "architecture": "unknown",
+          "os": "unknown"
+        },
+        {
+          "architecture": "386",
+          "os": "linux"
+        },
+        {
+          "architecture": "unknown",
+          "os": "unknown"
+        },
+        {
+          "architecture": "ppc64le",
+          "os": "linux"
+        },
+        {
+          "architecture": "unknown",
+          "os": "unknown"
+        },
+        {
+          "architecture": "riscv64",
+          "os": "linux"
+        },
+        {
+          "architecture": "unknown",
+          "os": "unknown"
+        },
+        {
+          "architecture": "s390x",
+          "os": "linux"
+        },
+        {
+          "architecture": "unknown",
+          "os": "unknown"
+        }
+      ]
+    },
+    "redis": {
+      "image": "docker.io/library/redis:7@sha256:c6eabf748fc7a61dbb5a705c78bcf3d6377b1127a97d0ce965c11c44ba46896f",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "unknown",
+          "os": "unknown"
+        },
+        {
+          "architecture": "arm",
+          "os": "linux",
+          "variant": "v7"
+        },
+        {
+          "architecture": "unknown",
+          "os": "unknown"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux",
+          "variant": "v8"
+        },
+        {
+          "architecture": "unknown",
+          "os": "unknown"
+        },
+        {
+          "architecture": "386",
+          "os": "linux"
+        },
+        {
+          "architecture": "unknown",
+          "os": "unknown"
+        },
+        {
+          "architecture": "ppc64le",
+          "os": "linux"
+        },
+        {
+          "architecture": "unknown",
+          "os": "unknown"
+        }
+      ]
+    },
+    "clickhouse": {
+      "image": "docker.io/clickhouse/clickhouse-server:25.12@sha256:8a790dd3468db22b1d4e7b18a176f378ff5ff6053b9c48dd4ea1fa71a24c5ba6",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        },
+        {
+          "architecture": "unknown",
+          "os": "unknown"
+        },
+        {
+          "architecture": "unknown",
+          "os": "unknown"
+        }
+      ]
+    },
+    "minio": {
+      "image": "cgr.dev/chainguard/minio:latest@sha256:22bf0ad174612a0106dfbbb95818f307525dd32c5a6ec119ecd7273815abe456",
+      "platforms": [
+        {
+          "architecture": "amd64",
+          "os": "linux"
+        },
+        {
+          "architecture": "arm64",
+          "os": "linux"
+        }
+      ]
+    }
+  }
+}

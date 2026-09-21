@@ -40,3 +40,7 @@ recovery-check:
 .PHONY: langfuse-check
 langfuse-check:
 	.venv/bin/python scripts/check_langfuse.py
+
+.PHONY: langfuse-stack-check
+langfuse-stack-check:
+	.venv/bin/python scripts/langfuse_stack.py check

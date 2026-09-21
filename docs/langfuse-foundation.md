@@ -184,6 +184,10 @@ make langfuse-check
 
 协议依据：[Langfuse Public API](https://langfuse.com/docs/api-and-data-platform/features/public-api)（项目凭证与 Observations v2）、[弃用 API 迁移](https://langfuse.com/faq/all/deprecated-api-migration)。新入口只支持 Observations v2，不自动退回旧 trace API；部署版本需支持该接口。
 
+## 独立自托管配置
+
+已提供固定镜像摘要的六服务 Compose、私有凭证初始化、离线策略校验及升级/恢复说明，见 [自托管操作手册](langfuse-selfhost.md)。已通过 Compose 原生解析；尚未启动容器或完成真实平台回读。
+
 ## 验证与待办
 
 ```bash
@@ -194,6 +198,6 @@ env AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q
 
 测试使用实际锁定 SDK 的属性编码、实际 OTel span/protobuf 和 MockTransport，不需要外部凭证。覆盖线程上下文、跨租户过滤、多 exporter 数据边界、复用不重复计费、未知 usage、容量丢弃、超时关闭、平台失败/跳转/partial rejection 及 CLI 清理。Python CI 安装 langfuse extra 后执行这些测试；缺少可选 SDK 的常规环境会显式跳过此测试模块。
 
-LF-01 仍待：真实 Langfuse OTLP 联调和三类真实模型轨迹、补偿动作的因果关联、完整项目权限与保留/删除策略、自托管服务/镜像摘要锁定、部署/断网/吞吐与 P95 性能验收。当前不能用这份基础代码宣称完成完整 LF-01，更不能宣称策略质量已经提高。
+LF-01 仍待：真实 Langfuse OTLP 联调和三类真实模型轨迹、补偿动作的因果关联、完整项目权限与保留/删除策略、自托管容器启动、部署/断网/吞吐与 P95 性能验收。当前不能用这份基础代码宣称完成完整 LF-01，更不能宣称策略质量已经提高。
 
 官方依据：[SDK 与 OTel](https://langfuse.com/docs/observability/sdk/overview)、[现有 OTel 集成](https://langfuse.com/faq/all/existing-otel-setup)、[Python API 参考](https://python.reference.langfuse.com/langfuse)。实际编码以锁定 4.15.4 源码及 wire-format 测试为准。
