@@ -1,0 +1,13 @@
+{
+  "format": "agent-investigation-config/v1",
+  "mode": "synthetic",
+  "model_id": "synthetic-investigation-v1",
+  "split": "development",
+  "repeats": 1,
+  "context_strategy": "lexical",
+  "input_micro_per_token": 1,
+  "output_micro_per_token": 2,
+  "task_budget_micro_usd": 100000,
+  "total_budget_micro_usd": 400000,
+  "deadline_seconds": 1800
+}

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "name": "synthetic-investigation-pipeline-v1",
+  "provenance": "synthetic",
+  "cases": [
+    {
+      "id": "worker-lease",
+      "split": "development",
+      "entity_group": "worker",
+      "template_family": "lease-investigation",
+      "query": "Investigate alpha lease expiration",
+      "documents": [
+        {"id": "initial", "source": "fixture://worker/initial", "body": "alpha lease expiration: the worker stopped heartbeating during a database pause."},
+        {"id": "followup", "source": "fixture://worker/followup", "body": "followup: inspect fencing tokens and retained inference reservations before restarting the worker."}
+      ],
+      "relevant": ["initial", "followup"],
+      "context_budget": 6000
+    },
+    {
+      "id": "model-budget",
+      "split": "development",
+      "entity_group": "gateway",
+      "template_family": "budget-investigation",
+      "query": "Investigate alpha model budget exhaustion",
+      "documents": [
+        {"id": "initial", "source": "fixture://gateway/initial", "body": "alpha model budget exhaustion: an interrupted request retained its cost reservation."},
+        {"id": "followup", "source": "fixture://gateway/followup", "body": "followup: reconcile persisted request identity and validated output before considering another paid request."}
+      ],
+      "relevant": ["initial", "followup"],
+      "context_budget": 6000
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Langfuse 接入与 Agent 效果优化
 
-状态：**LF-01 partially implemented / locally verified；LF-02 offline retrieval foundation implemented；LF-03—LF-04 planned**。2026-09-20 确定接入方向。已实现可选 SDK/OTLP 元数据导出、跨进程关联、检索/只读工具/沙盒阶段及写动作生命周期、人工控制观测，见 [基础接入与验证边界](langfuse-foundation.md)。已提供默认离线、需显式启用联网的合成平台回读诊断入口，以及[独立自托管配置](langfuse-selfhost.md)（镜像摘要锁定、凭证初始化、Compose 解析已验证，容器启动待验收）。已补齐调查停止摘要、轮次、候选与验证重试身份及 Worker 等待原因；三类工作流本地验收 v2 覆盖这些字段、正常/关闭/拒绝导出及 Service 重建复用。默认不启用外部上传；真实 Langfuse、真实模型和生产部署验收尚未完成。LF-02 已提供[冻结数据集、可恢复检索对照及审计/失败用例导入](retrieval-experiments.md)，不依赖平台完成验收；模型/人工/judge 与平台实验仍待接入。下文保留完整目标契约，不将局部实现等同于整体验收。
+状态：**LF-01 partially implemented / locally verified；LF-02 retrieval foundation and investigation runner locally verified；LF-03—LF-04 planned**。2026-09-20 确定接入方向。已实现可选 SDK/OTLP 元数据导出、跨进程关联、检索/只读工具/沙盒阶段及写动作生命周期、人工控制观测，见 [基础接入与验证边界](langfuse-foundation.md)。已提供默认离线、需显式启用联网的合成平台回读诊断入口，以及[独立自托管配置](langfuse-selfhost.md)（镜像摘要锁定、凭证初始化、Compose 解析已验证，容器启动待验收）。已补齐调查停止摘要、轮次、候选与验证重试身份及 Worker 等待原因；三类工作流本地验收 v2 覆盖这些字段、正常/关闭/拒绝导出及 Service 重建复用。默认不启用外部上传；真实 Langfuse、真实模型和生产部署验收尚未完成。LF-02 已提供[冻结数据集、可恢复检索对照及审计/失败用例导入](retrieval-experiments.md)，不依赖平台完成验收；[单次/多轮调查实验 runner](investigation-experiments.md)已接入现有 Harness，默认合成响应，真实模型需显式付费/出站开关；真实供应商、人工/judge、修复与平台实验仍待验收。下文保留完整目标契约，不将局部实现等同于整体验收。
 
 ## 目标与交付能力
 
@@ -111,7 +111,7 @@ Langfuse 的 dataset/experiment 用于协作和比较；每次正式实验另导
 
 部署选择：本地/企业测试环境优先提供独立自托管配置；托管服务作为同一适配器的可选后端，要求配置端点与数据地域。新增独立 observability profile 或 Compose 文件，不把完整 Langfuse 依赖默认塞入核心应用启动。实现时锁定 SDK、服务版本和镜像摘要，确认基础设施、功能许可及容量要求，并记录升级测试。
 
-已实现的 Settings 配置包括启用开关、端点、project 凭证、任务采样率、队列容量及导出/flush 超时，具体名称与本地故障/开销报告见 [基础接入](langfuse-foundation.md)。当前只支持 metadata；redacted 内容模式、保留策略和实验费用上限仍为待实施契约。凭证仅在服务端持有。普通运行可采样，固定实验必须完整记录预期案例；丢失的必需实验记录会阻止形成通过结论。
+已实现的 Settings 配置包括启用开关、端点、project 凭证、任务采样率、队列容量及导出/flush 超时，具体名称与本地故障/开销报告见 [基础接入](langfuse-foundation.md)。当前只支持 metadata；redacted 内容模式和保留策略仍为待实施契约；调查实验已有静态总预算分配和逐任务账本，judge/修复与平台费用对账仍待实施。凭证仅在服务端持有。普通运行可采样，固定实验必须完整记录预期案例；丢失的必需实验记录会阻止形成通过结论。
 
 Langfuse 网络故障不改变业务执行结果，不消耗业务工具重试预算。实验可以保留本地结果待后续上传；所需输入/评分缺失时门禁返回证据不足。高质量观测依赖真实开销测量：比较启用前后 P95、CPU、内存与队列积压，不承诺异步导出没有开销。
 

@@ -1,6 +1,18 @@
 image: python:3.12-slim
 pipelines:
   custom:
+    investigation-experiment:
+      - step:
+          name: Paired investigation Harness experiment and durable resume
+          max-time: 10
+          script:
+            - pip install uv==0.12.17
+            - uv sync --extra dev --frozen
+            - .venv/bin/agent-py experiment-freeze examples/investigation-experiment.json .runtime/investigation-experiments/dataset.json
+            - .venv/bin/agent-py investigation-experiment .runtime/investigation-experiments/dataset.json examples/investigation-experiment-config.json .runtime/investigation-experiments/development
+            - .venv/bin/agent-py investigation-experiment .runtime/investigation-experiments/dataset.json examples/investigation-experiment-config.json .runtime/investigation-experiments/development --resume
+          artifacts:
+            - .runtime/investigation-experiments/**
     retrieval-experiment:
       - step:
           name: Frozen retrieval experiment, resume and independent audit

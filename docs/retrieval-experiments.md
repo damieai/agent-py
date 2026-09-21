@@ -1,6 +1,6 @@
 # 冻结数据集与可恢复的检索实验
 
-状态：LF-02 的**离线检索子实验**已实现。使用实际 ContextCompiler，对固定案例运行 none / lexical / bm25_rrf 三组对照；模型 Harness、人工/judge 评分、真实调查/修复对照及 Langfuse dataset/experiment 同步仍未接入。LF-01 的真实平台验收继续单独保留，不因本地实验可运行而视为完成。
+状态：LF-02 的**离线检索子实验**已实现。使用实际 ContextCompiler，对固定案例运行 none / lexical / bm25_rrf 三组对照；另有[调查 Harness 对照 runner](investigation-experiments.md)，已通过合成响应的预算和恢复验证；人工/judge 评分、真实模型调查/修复对照及 Langfuse dataset/experiment 同步仍未验收。LF-01 的真实平台验收继续单独保留，不因本地实验可运行而视为完成。
 
 ## 执行与恢复
 

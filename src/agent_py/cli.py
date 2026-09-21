@@ -765,3 +765,36 @@ def experiment_curate(run: Path, review: Path, output: Path):
     except (ValueError, OSError):
         raise typer.BadParameter("Curation evidence, review or output is invalid") from None
     typer.echo(f"Curated dataset: {lineage['output_dataset_digest']}; directory: {output}")
+
+
+@app.command()
+def investigation_experiment(
+    snapshot: Path,
+    config: Path,
+    output: Path,
+    resume: bool = False,
+    allow_model_api: bool = False,
+):
+    """Compare investigation Harness workflows. --allow-model-api permits paid input export."""
+    import os
+
+    from agent_py.investigation_experiments import run_investigation_experiment
+
+    try:
+        report = run_investigation_experiment(
+            snapshot,
+            config,
+            output,
+            resume=resume,
+            allow_model_api=allow_model_api,
+            api_key=os.environ.get("AGENT_EXPERIMENT_MODEL_API_KEY", "") if allow_model_api else "",
+        )
+    except (ValueError, OSError):
+        raise typer.BadParameter(
+            "Investigation experiment configuration, evidence or recovery state is invalid"
+        ) from None
+    typer.echo(
+        f"Execution: {report['execution_status']}; mode: {report['mode']}; report: {output / 'report.json'}"
+    )
+    if report["execution_status"] != "COMPLETE":
+        raise typer.Exit(1)
