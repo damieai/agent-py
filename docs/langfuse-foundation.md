@@ -44,7 +44,7 @@ tenant、task session、推理身份使用独立密钥的 HMAC-SHA256 伪名，�
 
 ## 导出与数据边界
 
-允许导出的 span 名仅有 `task.accepted`、`task.dispatch`、`worker.tick`、`model.generation`、`model.result_reused`、`retrieval.compile`、`tool.read`、`sandbox.verify`、下述五种 `operation.*` 以及显式联调专用的 `diagnostic.probe` / `diagnostic.child`，且 instrumentation scope 必须是项目自己的 `agent-py`。应用端只添加选定字段；处理器在排队前重建干净 span，剔除其余属性、事件、未允许的 links、status 文本和资源元数据。
+允许导出的 span 名仅有 `task.accepted`、`task.dispatch`、`worker.tick`、`model.generation`、`model.result_reused`、`retrieval.compile`、`tool.read`、`sandbox.verify`、下述六种 `operation.*` 与四种任务控制 span 以及显式联调专用的 `diagnostic.probe` / `diagnostic.child`，且 instrumentation scope 必须是项目自己的 `agent-py`。应用端只添加选定字段；处理器在排队前重建干净 span，剔除其余属性、事件、未允许的 links、status 文本和资源元数据。
 
 不导出任务目标、查询原文、证据正文、源代码、补丁、模型输出、异常信息、headers、原始业务 ID 或凭证。正文摘要不等于内容授权，因此首期不支持 redacted/input-output 模式。其他 exporter（包括本地 JSONL）仍执行各自白名单，不能认为 Langfuse 过滤器会替它们脱敏。
 
@@ -93,12 +93,28 @@ Dispatcher 保存首次派发的 traceparent，通过 Temporal workflow/activity
 | `operation.execute` | 只有 CAS 成功并提交 PENDING 意图后才进入；包围适配器执行及本地回执落账 |
 | `operation.query` | 对 PENDING/UNKNOWN 动作进行权威查询及回执校验；终态调用不产生查询 span |
 | `operation.result_reused` | execute 读到已有派发/终态记录，直接复用而不调用适配器 |
+| `operation.escalate` | 超时未确认动作的 MANUAL_REVIEW 更新提交后记录；重复扫描、CAS 失败或事务回滚不新增升级记录 |
 
-元数据包含固定工具类型、账本 attempts、执行配置 simulation/live、状态及 operation HMAC 伪名；相同租户/任务/动作的各阶段使用相同伪名。不会导出参数、resource、审批人、外部回执 ID、返回正文或异常文本。生命周期 span 不生成模型 usage/cost。
+元数据包含固定工具类型、action_kind=standard/rollback、账本 attempts、执行配置 simulation/live、状态及 operation HMAC 伪名；相同租户/任务/动作的各阶段使用相同伪名。不会导出参数、resource、审批人、外部回执 ID、返回正文或异常文本。生命周期 span 不生成模型 usage/cost。
 
 `stage.outcome=completed` 表示方法正常返回，动作成败必须读取 `status`：响应丢失、未经确认的回执仍为 UNKNOWN；适配器明确拒绝才为 FAILED；只有账本接受权威确认后才记录 SUCCEEDED。本地落账失败记录 error 和派发后的 PENDING，恢复必须查询权威，不依据 span 重发动作。`changed` 只有在 outcome=completed 时才能视作方法成功提交后的变更指示；它不是审计事件。
 
-执行模式来自服务配置，不是外部能力认证。当前测试使用本地持久化 SimulatedSystem，包含响应丢失、回执滞后、并发 CAS、审批重试、无效回执及落账失败；未认证的 live 写适配器仍在派发前拒绝。真实企业写动作验收、人工升级/取消/补偿的完整观测以及平台展示仍未完成。
+执行模式来自服务配置，不是外部能力认证。当前测试使用本地持久化 SimulatedSystem，包含响应丢失、回执滞后、并发 CAS、审批重试、无效回执及落账失败；未认证的 live 写适配器仍在派发前拒绝。真实企业写动作验收、自动补偿的因果关联以及平台展示仍未完成。回滚现有路径的审批、派发、UNKNOWN、对账与结果复用都使用相同动作伪名；不能将 rollback 标签当作已实现自动 Saga。
+
+## 取消、接管、恢复与结束
+
+| span | 状态语义 |
+|---|---|
+| `task.cancel` | 取消请求提交后记录 cancelled/status；不代表在途外部动作被撤销 |
+| `task.takeover` | 人工接管及重复请求；不改写取消事实 |
+| `task.resume` | 通过版本、权限、截止时间及策略检查后恢复；错误不伪造恢复结果 |
+| `task.finish` | 结束检查返回的实际状态；UNKNOWN/PENDING 保持对账等待，接管任务保持等待，缺验证证据不得标成功 |
+
+元数据白名单只包含 task_status、task_result、version、cancelled、taken_over、changed 及少量固定 waiting_reason；不导出操作者、任务目标或任意错误/等待文本。`changed` 区分业务变更与幂等调用，只有 outcome=completed 时可按成功提交解释。finish 调用正常返回不一定终止任务，必须结合 task_status 与 task_result；未结束时不补造结果。方法耗时包含现有数据库操作，不表示用户等待时长。
+
+operation.escalate 是提交后发出的短 observation，其耗时不代表数据库升级耗时。它同时记录动作 UNKNOWN/PENDING 与任务控制状态，人工接管或取消不会被升级扫描覆盖。账本事件仍是审计事实，进程在提交后、导出前终止可能使该 observation 缺失，不为补遥测重做升级。
+
+本地测试覆盖取消后的未知结果对账、重复取消/结束、过期版本恢复失败、并发人工升级、升级事务回滚、导出失败不阻止取消，以及回滚审批后的响应丢失/查询确认/幂等复用。stop/resume/finish 的原有返回契约及授权规则保持一致；观测不会派发补偿动作。真实业务效果仍以外部权威与验证证据为准。
 
 ## 任务级采样与本地导出验收
 
@@ -171,13 +187,13 @@ make langfuse-check
 ## 验证与待办
 
 ```bash
-.venv/bin/pytest tests/test_langfuse.py tests/test_trace_context.py tests/test_stage_observations.py tests/test_operation_observations.py tests/test_langfuse_batching.py tests/test_langfuse_check.py -q
+.venv/bin/pytest tests/test_langfuse.py tests/test_trace_context.py tests/test_stage_observations.py tests/test_operation_observations.py tests/test_langfuse_batching.py tests/test_langfuse_check.py tests/test_lifecycle_observations.py -q
 env AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_trace_context.py -m integration -q
 env AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q
 ```
 
 测试使用实际锁定 SDK 的属性编码、实际 OTel span/protobuf 和 MockTransport，不需要外部凭证。覆盖线程上下文、跨租户过滤、多 exporter 数据边界、复用不重复计费、未知 usage、容量丢弃、超时关闭、平台失败/跳转/partial rejection 及 CLI 清理。Python CI 安装 langfuse extra 后执行这些测试；缺少可选 SDK 的常规环境会显式跳过此测试模块。
 
-LF-01 仍待：真实 Langfuse OTLP 联调和三类真实模型轨迹、人工升级/取消/补偿 observation、完整项目权限与保留/删除策略、自托管服务/镜像摘要锁定、部署/断网/吞吐与 P95 性能验收。当前不能用这份基础代码宣称完成完整 LF-01，更不能宣称策略质量已经提高。
+LF-01 仍待：真实 Langfuse OTLP 联调和三类真实模型轨迹、补偿动作的因果关联、完整项目权限与保留/删除策略、自托管服务/镜像摘要锁定、部署/断网/吞吐与 P95 性能验收。当前不能用这份基础代码宣称完成完整 LF-01，更不能宣称策略质量已经提高。
 
 官方依据：[SDK 与 OTel](https://langfuse.com/docs/observability/sdk/overview)、[现有 OTel 集成](https://langfuse.com/faq/all/existing-otel-setup)、[Python API 参考](https://python.reference.langfuse.com/langfuse)。实际编码以锁定 4.15.4 源码及 wire-format 测试为准。

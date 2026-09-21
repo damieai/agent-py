@@ -28,7 +28,7 @@ from agent_py.domain import (
     TaskContract,
     digest,
 )
-from agent_py.observations import operation_attributes, stage
+from agent_py.observations import operation_attributes, stage, task_attributes
 from agent_py.security import authorize, check_grant
 
 
@@ -171,6 +171,13 @@ class Service:
             return t
 
     def stop(self, p: Principal, task_id: str, takeover: bool = False):
+        name = "task.takeover" if takeover else "task.cancel"
+        with stage(self.telemetry, name, p.tenant_id, task_id) as span:
+            task = self._stop(p, task_id, takeover, span)
+            span.set_attributes(task_attributes(task))
+
+    def _stop(self, p, task_id, takeover, span):
+        span.set_attribute("stage.changed", False)
         with self.db.session(p.tenant_id) as s:
             t = tenant_get(s, Task, task_id, p.tenant_id, True)
             authorize(s, p, t)
@@ -181,7 +188,7 @@ class Service:
                     403,
                 )
             if t.status == "TERMINATED" or t.cancelled or (t.taken_over and takeover):
-                return
+                return t
             changed = s.execute(
                 update(Task)
                 .where(
@@ -202,8 +209,17 @@ class Service:
             if changed.rowcount != 1:
                 raise DomainError("TASK_CHANGED", "Task changed; refresh before retrying")
             emit(s, t, "task.takeover" if takeover else "task.cancelled", {})
+            span.set_attribute("stage.changed", True)
+            return t
 
     def resume(self, p: Principal, task_id: str, expected_version: int):
+        with stage(self.telemetry, "task.resume", p.tenant_id, task_id) as span:
+            task = self._resume(p, task_id, expected_version, span)
+            span.set_attributes(task_attributes(task))
+            return task
+
+    def _resume(self, p, task_id, expected_version, span):
+        span.set_attribute("stage.changed", False)
         with self.db.session(p.tenant_id) as s:
             t = tenant_get(s, Task, task_id, p.tenant_id, True)
             authorize(s, p, t, "operator")
@@ -238,6 +254,7 @@ class Service:
             if changed.rowcount != 1:
                 raise DomainError("TASK_CHANGED", "Task changed; refresh before resuming")
             emit(s, t, "task.resumed", {"actor": p.subject, "version": expected_version + 1})
+            span.set_attribute("stage.changed", True)
             return t
 
     def propose(self, p: Principal, task_id: str, step: str, action: ActionProposal) -> Operation:
@@ -507,6 +524,22 @@ class Service:
             return recorded
 
     def escalate_uncertain(self, tenant: str, operation_id: str):
+        result = self._escalate_uncertain(tenant, operation_id)
+        if result is not None:
+            operation, task = result
+            # Emit only after the transaction commits; repeat scans do not invent transitions.
+            with stage(
+                self.telemetry,
+                "operation.escalate",
+                tenant,
+                task.id,
+                **operation_attributes(self, operation),
+                **task_attributes(task),
+                **{"stage.recovery_status": "MANUAL_REVIEW", "stage.changed": True},
+            ):
+                pass
+
+    def _escalate_uncertain(self, tenant, operation_id):
         with self.db.session(tenant) as s:
             changed = s.execute(
                 update(Operation)
@@ -530,6 +563,7 @@ class Service:
             emit(
                 s, t, "operation.escalated", {"operation_id": op.id, "reason": "UNCONFIRMED_15_MIN"}
             )
+            return op, t
 
     def reserve(self, tenant: str, task_id: str, call_key: str, maximum: int):
         if maximum <= 0:
@@ -664,6 +698,13 @@ class Service:
                 )
 
     def finish(self, tenant: str, task_id: str):
+        with stage(self.telemetry, "task.finish", tenant, task_id) as span:
+            task = self._finish(tenant, task_id, span)
+            span.set_attributes(task_attributes(task))
+            return task
+
+    def _finish(self, tenant, task_id, span):
+        span.set_attribute("stage.changed", False)
         with self.db.session(tenant) as s:
             t = tenant_get(s, Task, task_id, tenant, True)
             ops = s.scalars(
@@ -672,6 +713,9 @@ class Service:
             if t.taken_over:
                 return t
             if any(o.status in {"UNKNOWN", "PENDING"} for o in ops):
+                span.set_attribute(
+                    "stage.changed", (t.status, t.waiting_reason) != ("WAITING", "RECONCILIATION")
+                )
                 t.status, t.waiting_reason = "WAITING", "RECONCILIATION"
                 return t
             if not t.cancelled and any(o.status == "NOT_SUBMITTED" for o in ops):
@@ -697,4 +741,5 @@ class Service:
                 )
             t.status, t.result, t.waiting_reason = "TERMINATED", result, None
             emit(s, t, "task.terminated", {"result": result})
+            span.set_attribute("stage.changed", True)
             return t

@@ -39,15 +39,35 @@ OPERATIONS = {
     "operation.execute",
     "operation.query",
     "operation.result_reused",
+    "operation.escalate",
 }
 for name in OPERATIONS:
     STAGES[name] = {
         "tool": {"create_pr", "trigger_ci", "merge_pr", "deploy", "rollback", "runbook"},
         "status": {"NOT_SUBMITTED", "PENDING", "UNKNOWN", "SUCCEEDED", "FAILED"},
         "execution_mode": {"simulation", "live"},
+        "action_kind": {"standard", "rollback"},
     }
     STAGE_NUMBERS[name] = {"attempt": (0, 100)}
 STAGES["operation.approval"]["decision"] = {"APPROVED", "REJECTED"}
+STAGES["operation.escalate"]["recovery_status"] = {"MANUAL_REVIEW"}
+TASK_STAGES = {"task.cancel", "task.takeover", "task.resume", "task.finish"}
+for name in TASK_STAGES | {"operation.escalate"}:
+    STAGES.setdefault(name, {}).update(
+        {
+            "task_status": {"QUEUED", "RUNNING", "WAITING", "CANCELLING", "TERMINATED"},
+            "task_result": {"SUCCESS", "FAILED", "CANCELLED"},
+            "waiting_reason": {
+                "HUMAN_TAKEOVER",
+                "RECONCILIATION",
+                "MANUAL_REVIEW",
+                "APPROVAL",
+                "HUMAN_REVIEW",
+                "EVIDENCE_REQUIRED",
+            },
+        }
+    )
+    STAGE_NUMBERS.setdefault(name, {})["version"] = (0, 10**12)
 DIGESTS = {"request_digest", "prompt_digest", "context_digest", "release_digest"}
 NUMBERS = {"reserved_micro_usd", "input_price", "output_price"}
 
@@ -105,6 +125,11 @@ class LangfuseProcessor(SpanProcessor):
         metadata = {"tenant": self.pseudonym(tenant, "tenant", tenant)}
         if span.name in {"diagnostic.probe", "diagnostic.child"}:
             metadata["synthetic"] = True
+        if span.name in TASK_STAGES | {"operation.escalate"}:
+            for field in ("cancelled", "taken_over", "changed"):
+                value = attrs.get("stage." + field)
+                if type(value) is bool:
+                    metadata[field] = value
         if span.name in OPERATIONS:
             identifier = attrs.get("operation.id")
             if isinstance(identifier, str) and 0 < len(identifier) <= 160:

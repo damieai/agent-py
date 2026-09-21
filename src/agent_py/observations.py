@@ -27,4 +27,19 @@ def operation_attributes(service, operation):
         "stage.attempt": operation.attempts,
         "stage.status": operation.status,
         "stage.execution_mode": service.settings.execution_mode,
+        "stage.action_kind": "rollback" if operation.tool == "rollback" else "standard",
     }
+
+
+def task_attributes(task):
+    values = {
+        "stage.task_status": task.status,
+        "stage.cancelled": task.cancelled,
+        "stage.taken_over": task.taken_over,
+        "stage.version": task.version,
+    }
+    if task.result is not None:
+        values["stage.task_result"] = task.result
+    if task.waiting_reason is not None:
+        values["stage.waiting_reason"] = task.waiting_reason
+    return values
