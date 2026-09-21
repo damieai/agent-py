@@ -184,6 +184,32 @@ make langfuse-check
 
 协议依据：[Langfuse Public API](https://langfuse.com/docs/api-and-data-platform/features/public-api)（项目凭证与 Observations v2）、[弃用 API 迁移](https://langfuse.com/faq/all/deprecated-api-migration)。新入口只支持 Observations v2，不自动退回旧 trace API；部署版本需支持该接口。
 
+## 三类工作流的本地轨迹验收
+
+```bash
+make langfuse-trajectories-check
+# 等价命令；只使用临时数据和固定替身，不需要平台/模型凭证
+.venv/bin/python scripts/check_langfuse_trajectories.py
+```
+
+此入口通过实际 Activities.tick、InvestigationHarness、RepairHarness、预算/推理账本、制品存储及真实 OTLP protobuf/回环 HTTP，分别运行单次调查、多轮调查和候选修复。每个工作流在 disabled、healthy、rejected（HTTP 503）三种导出模式下各运行一次，共九个隔离子进程；不启动 Temporal server。清除继承的 AGENT/LANGFUSE/OTEL/模型提供商环境变量，Settings 不读取 .env，模型使用 MockTransport，沙盒只检查固定源码字节，不执行候选代码，企业写执行器始终禁用。
+
+每例先推进到人工审核状态，再关闭 exporter、重建 Service/Harness/provider/数据库连接池并重放 tick，验证持久化决策和制品复用。此处是有序重建，不是 SIGKILL 恢复演练。验收条件包括：
+
+- 单次调查 1 次模型请求、多轮调查 3 次并以 ROUND_LIMIT 停止、候选修复 1 次且基线/候选验证各 1 次；重建后不增加模型或沙盒调用。
+- 账本余额、reservation 实际金额与 generation 导出的 usage/cost 相符；result_reused 引用同一推理伪名和请求摘要，不再次记录费用。
+- 三种导出模式的业务汇总完全一致；没有 Operation，原始源码不变，任务仍等待审核，不伪造业务 SUCCESS。
+- generation/retrieval/sandbox 是对应 worker.tick 的子 span；tick 使用独立根、关联原始 task.accepted 和前一个 tick；Service 重建不切断关联。
+- OTLP 不包含注入到目标、证据、模型答复、源码、日志及密钥中的 canary，也不包含原始 task ID 或临时目录；关闭模式无上传，503 模式按 span 计失败且不影响业务。
+
+使用固定合成单价：输入 1、输出 2 micro-USD/token。三个场景账本分别为 50、150、40 micro-USD，**不是实际模型费用或生产质量测量**。不以此样本推断性能收益。
+
+报告位于 `.runtime/langfuse-trajectories/run-*/report.json`（目录 0700、文件 0600），保留源码/锁文件摘要、九组业务账本汇总、经过选择的 OTLP span 身份/父子/link/usage/cost 字段、HTTP 次数及 exporter 计数，不保存请求正文、模型响应或原始 OTLP。父进程从证据重新计算结果；子进程失败、超时、证据缺失/类型错误、源码在运行中变化或任何不变量失败都返回非零。测试包含重复 generation、断链、费用篡改、重复计费和缺失报告等反例。
+
+correctness=PASS 仅表示本地契约通过；platform、real_model、real_sandbox 始终标为 NOT_RUN，performance 为 NOT_ASSESSED。此报告不进入质量优化门禁冒充真实实验。Bitbucket 自定义 `langfuse-trajectory-rehearsal` 保存报告，默认 Python 测试也运行九组验收与反例。真实模型、容器验证和 Langfuse 控制台/回读验收仍需单独执行。
+
+2026-09-21 实测九组 correctness=PASS，原始报告为 `.runtime/langfuse-trajectories/run-0vfjpdc9/report.json`。正常模式分别收到 7、17、10 条 span，重建后无额外模型请求；其余平台/真实执行状态保持 NOT_RUN。
+
 ## 独立自托管配置
 
 已提供固定镜像摘要的六服务 Compose、私有凭证初始化、离线策略校验及升级/恢复说明，见 [自托管操作手册](langfuse-selfhost.md)。已通过 Compose 原生解析；尚未启动容器或完成真实平台回读。

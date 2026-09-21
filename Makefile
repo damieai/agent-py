@@ -44,3 +44,7 @@ langfuse-check:
 .PHONY: langfuse-stack-check
 langfuse-stack-check:
 	.venv/bin/python scripts/langfuse_stack.py check
+
+.PHONY: langfuse-trajectories-check
+langfuse-trajectories-check:
+	.venv/bin/python scripts/check_langfuse_trajectories.py

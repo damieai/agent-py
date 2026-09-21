@@ -1,6 +1,16 @@
 image: python:3.12-slim
 pipelines:
   custom:
+    langfuse-trajectory-rehearsal:
+      - step:
+          name: Three-workflow Langfuse local trajectory rehearsal
+          max-time: 10
+          script:
+            - pip install uv==0.12.17
+            - uv sync --extra dev --extra langfuse --frozen
+            - .venv/bin/python scripts/check_langfuse_trajectories.py
+          artifacts:
+            - .runtime/langfuse-trajectories/**
     langfuse-local-probe:
       - step:
           name: Langfuse loopback export fault and overhead probe
