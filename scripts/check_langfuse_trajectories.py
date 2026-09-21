@@ -18,6 +18,23 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ("investigate", "investigation_loop", "repair_candidate")
 MODES = ("disabled", "healthy", "rejected")
 PREFIX = "langfuse.observation."
+WORKFLOW_FIELDS = (
+    "workflow",
+    "round",
+    "repair_run_id",
+    "candidate_id",
+    "candidate_ordinal",
+    "verification_id",
+    "verification_outcome",
+    "waiting_reason",
+    "phase",
+    "stop_reason",
+    "rounds",
+    "changed",
+    "baseline_digest",
+    "candidate_digest",
+    "oracle_digest",
+)
 PRIVATE = "PRIVATE_TRAJECTORY_CANARY"
 EXPECTED = {"investigate": (1, 50), "investigation_loop": (3, 150), "repair_candidate": (1, 40)}
 
@@ -146,6 +163,83 @@ def validate_case(case):
                 original is not None and original["request_digest"] == span["request_digest"],
                 "reuse_identity",
             )
+            if workflow == "investigation_loop":
+                require(
+                    original is not None
+                    and original["workflow_metadata"].get("round")
+                    == span["workflow_metadata"].get("round"),
+                    "reuse_round",
+                )
+    require(
+        ticks
+        and ticks[-1]["workflow_metadata"].get("waiting_reason")
+        == ("CANDIDATE_READY_FOR_REVIEW" if workflow == "repair_candidate" else "HUMAN_REVIEW"),
+        "worker_waiting_reason",
+    )
+    if workflow == "investigation_loop":
+        require(
+            sorted(s["workflow_metadata"].get("round", 0) for s in generations.values())
+            == [1, 2, 3],
+            "round_identity",
+        )
+    if workflow != "repair_candidate":
+        summaries = [s["workflow_metadata"] for s in spans if s["name"] == "investigation.summary"]
+        require(
+            len(summaries) == 2 and [s.get("changed") for s in summaries] == [True, False],
+            "summary_reuse",
+        )
+        require(
+            all(
+                s.get("stop_reason") == business["stop_reason"] and s.get("rounds") == calls
+                for s in summaries
+            ),
+            "summary_reason",
+        )
+    else:
+        candidates = [
+            s["workflow_metadata"]
+            for s in spans
+            if s["name"] in {"model.generation", "sandbox.verify", "verification.result"}
+        ]
+        require(
+            len(candidates) == 4
+            and len({s.get("candidate_id") for s in candidates}) == 1
+            and all(
+                len(s.get("candidate_id", "")) == 64 and s.get("candidate_ordinal") == 1
+                for s in candidates
+            ),
+            "candidate_identity",
+        )
+        require(
+            len({s.get("repair_run_id") for s in candidates}) == 1
+            and all(len(s.get("repair_run_id", "")) == 64 for s in candidates),
+            "repair_run_identity",
+        )
+        verifications = [
+            s["workflow_metadata"]
+            for s in spans
+            if s["name"] in {"sandbox.verify", "verification.result"}
+        ]
+        require(
+            len({s.get("verification_id") for s in verifications}) == 1
+            and all(len(s.get("verification_id", "")) == 64 for s in verifications),
+            "verification_identity",
+        )
+        results = [s["workflow_metadata"] for s in spans if s["name"] == "verification.result"]
+        require(
+            len(results) == 1 and results[0].get("verification_outcome") == business["stop_reason"],
+            "verification_result",
+        )
+        require(
+            all(
+                all(
+                    len(s.get(key, "")) == 64
+                    for key in ("baseline_digest", "candidate_digest", "oracle_digest")
+                )
+                for s in results
+            ),
+            "verification_digests",
+        )
     require(total * 1_000_000 == spent, "export_cost")
     return sorted(set(errors))
 
@@ -189,6 +283,11 @@ def decode(payloads):
                             "request_digest": attrs.get(PREFIX + "metadata.request_digest", ""),
                             "context_digest": attrs.get(PREFIX + "metadata.context_digest", ""),
                             "outcome": attrs.get(PREFIX + "metadata.outcome", ""),
+                            "workflow_metadata": {
+                                key: attrs[PREFIX + "metadata." + key]
+                                for key in WORKFLOW_FIELDS
+                                if PREFIX + "metadata." + key in attrs
+                            },
                             "usage": json.loads(attrs.get(PREFIX + "usage_details", "{}")),
                             "cost": json.loads(attrs.get(PREFIX + "cost_details", "{}")),
                         }
@@ -523,7 +622,7 @@ def main():
     if inputs() != before:
         errors.append("inputs_changed")
     report = dict(
-        schema_version=1,
+        schema_version=2,
         scope="synthetic_model_sandbox_real_harness_loopback_otlp",
         correctness="FAIL" if errors else "PASS",
         platform="NOT_RUN",

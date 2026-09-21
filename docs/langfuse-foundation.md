@@ -184,6 +184,20 @@ make langfuse-check
 
 协议依据：[Langfuse Public API](https://langfuse.com/docs/api-and-data-platform/features/public-api)（项目凭证与 Observations v2）、[弃用 API 迁移](https://langfuse.com/faq/all/deprecated-api-migration)。新入口只支持 Observations v2，不自动退回旧 trace API；部署版本需支持该接口。
 
+## 调查轮次、候选与验证重试的关联
+
+模型调用和复用现在都记录有界的调查 `round`（1—3）。修复 generation、result_reused、sandbox.verify 与新增 verification.result 共享 `repair_run_id`、`candidate_ordinal` 和 `candidate_id`；基线/候选执行及持久化验证结果另共享 `verification_id`。运行、候选和验证标识使用环境/租户/任务域内 HMAC，不导出原始 run ID 或 verification token。不同候选有不同身份；同一候选经人工批准重试验证时保留候选身份、生成新的验证身份。
+
+这些字段通过独立观测参数传递，不加入模型 context、请求正文、call_key 或请求摘要。旧调用方仍可不传关联参数；已有持久化推理身份仍可复用，不因观测升级重复计费。直接调用 VerificationRunner 而没有 repair_run_id 的场景不会虚构候选关联。
+
+`investigation.summary` 在调查制品及等待审核状态提交后记录：工作流、轮次数、停止原因与 changed。单次调查原因是 HUMAN_REVIEW；多轮调查区分 MODEL_STOP、ROUND_LIMIT、REPEATED_QUERY、NO_PROGRESS、NO_EVIDENCE。没有证据而尚未进行调查时只有等待状态，不伪造完成摘要。重复读取已提交调查可产生 changed=false 的摘要；它是本次读取的观测，不是新的业务完成事件。制品写入或等待状态事务提交失败时不发出成功摘要。
+
+`verification.result` 只在验证报告持久化成功后产生，记录 REGRESSION_FIXED / CANDIDATE_FAILED / BASELINE_NOT_REPRODUCED / INCONCLUSIVE，以及基线、候选和可信 oracle 的清单摘要。短 span 不代表整个验证耗时（耗时仍看 sandbox.verify），也不表示候选被接受、合并或部署。后续修复账本提交失败时，已保存的验证报告仍可恢复，不能把报告存在等同于修复状态已推进。
+
+Worker tick 记录有限集合内的 phase、waiting_reason、blocked 和终态结果。未知等待原因归一化为 OTHER，不导出任意错误码或异常文本；执行阶段抛出的异常标为 error，再按原路径抛出。返回结构、授权检查、预算和工作流控制逻辑保持原契约。
+
+专项测试覆盖停止分支、摘要重复读取、制品/事务失败、两个候选、验证中断后的人工重试、旧请求身份兼容、跨任务伪名隔离、无效字段及未知错误脱敏。以上是本地 OTLP 协议验证，控制台展示仍待实测。
+
 ## 三类工作流的本地轨迹验收
 
 ```bash
@@ -204,11 +218,13 @@ make langfuse-trajectories-check
 
 使用固定合成单价：输入 1、输出 2 micro-USD/token。三个场景账本分别为 50、150、40 micro-USD，**不是实际模型费用或生产质量测量**。不以此样本推断性能收益。
 
-报告位于 `.runtime/langfuse-trajectories/run-*/report.json`（目录 0700、文件 0600），保留源码/锁文件摘要、九组业务账本汇总、经过选择的 OTLP span 身份/父子/link/usage/cost 字段、HTTP 次数及 exporter 计数，不保存请求正文、模型响应或原始 OTLP。父进程从证据重新计算结果；子进程失败、超时、证据缺失/类型错误、源码在运行中变化或任何不变量失败都返回非零。测试包含重复 generation、断链、费用篡改、重复计费和缺失报告等反例。
+报告 schema_version=2（新增轮次/候选/验证身份及摘要核对，旧 v1 报告不能作为新契约的验收证据），位于 `.runtime/langfuse-trajectories/run-*/report.json`（目录 0700、文件 0600），保留源码/锁文件摘要、九组业务账本汇总、经过选择的 OTLP span 身份/父子/link/usage/cost 字段、HTTP 次数及 exporter 计数，不保存请求正文、模型响应或原始 OTLP。父进程从证据重新计算结果；子进程失败、超时、证据缺失/类型错误、源码在运行中变化或任何不变量失败都返回非零。测试包含重复 generation、断链、费用篡改、重复计费和缺失报告等反例。
 
 correctness=PASS 仅表示本地契约通过；platform、real_model、real_sandbox 始终标为 NOT_RUN，performance 为 NOT_ASSESSED。此报告不进入质量优化门禁冒充真实实验。Bitbucket 自定义 `langfuse-trajectory-rehearsal` 保存报告，默认 Python 测试也运行九组验收与反例。真实模型、容器验证和 Langfuse 控制台/回读验收仍需单独执行。
 
-2026-09-21 实测九组 correctness=PASS，原始报告为 `.runtime/langfuse-trajectories/run-0vfjpdc9/report.json`。正常模式分别收到 7、17、10 条 span，重建后无额外模型请求；其余平台/真实执行状态保持 NOT_RUN。
+关联字段扩展前，2026-09-21 的 v1 验收九组 correctness=PASS，原始报告为 `.runtime/langfuse-trajectories/run-0vfjpdc9/report.json`。正常模式分别收到 7、17、10 条 span，重建后无额外模型请求；其余平台/真实执行状态保持 NOT_RUN。
+
+v2 实测九组 correctness=PASS，报告 `.runtime/langfuse-trajectories/run-g7yexzu3/report.json`；正常模式分别为 9、19、11 条 span，新增摘要与候选/验证身份核对通过。全量回归 636 passed / 10 skipped，最后等待原因白名单调整及新增反例经 35 项专项复跑通过。
 
 ## 独立自托管配置
 
@@ -217,7 +233,7 @@ correctness=PASS 仅表示本地契约通过；platform、real_model、real_sand
 ## 验证与待办
 
 ```bash
-.venv/bin/pytest tests/test_langfuse.py tests/test_trace_context.py tests/test_stage_observations.py tests/test_operation_observations.py tests/test_langfuse_batching.py tests/test_langfuse_check.py tests/test_lifecycle_observations.py -q
+.venv/bin/pytest tests/test_langfuse.py tests/test_trace_context.py tests/test_stage_observations.py tests/test_operation_observations.py tests/test_langfuse_batching.py tests/test_langfuse_check.py tests/test_lifecycle_observations.py tests/test_workflow_observations.py tests/test_langfuse_trajectories.py -q
 env AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_trace_context.py -m integration -q
 env AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q
 ```

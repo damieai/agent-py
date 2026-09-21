@@ -47,6 +47,7 @@ def report(tmp_path_factory):
 
 
 def test_real_harness_rehearsal_is_complete_and_does_not_claim_platform_acceptance(report):
+    assert report["schema_version"] == 2
     assert report["correctness"] == "PASS"
     assert report["platform"] == report["real_model"] == report["real_sandbox"] == "NOT_RUN"
     assert report["performance"] == "NOT_ASSESSED"
@@ -160,3 +161,20 @@ def test_changed_inputs_cannot_pass(report, tmp_path, monkeypatch):
     assert exc.value.code == 1
     result = json.loads(next(tmp_path.glob("run-*/report.json")).read_text())
     assert result["errors"] == ["inputs_changed"]
+
+
+@pytest.mark.parametrize(
+    "field,error",
+    [("candidate_id", "candidate_identity"), ("verification_id", "verification_identity")],
+)
+def test_repair_lineage_mismatch_cannot_pass(report, field, error):
+    case = deepcopy(
+        next(
+            c
+            for c in report["cases"]
+            if c["workflow"] == "repair_candidate" and c["mode"] == "healthy"
+        )
+    )
+    result = next(s for s in case["spans"] if s["name"] == "verification.result")
+    result["workflow_metadata"][field] = "f" * 64
+    assert error in probe.validate_case(case)

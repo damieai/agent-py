@@ -398,6 +398,8 @@ class RepairHarness:
                 f"repair:{run.id}:{attempt.ordinal}",
                 task.contract["goal"],
                 context,
+                repair_run_id=run.id,
+                candidate_ordinal=attempt.ordinal,
             )
             self._check(principal, task_id)
             compiler.validate(
@@ -495,6 +497,8 @@ class RepairHarness:
                         PatchProposal.model_validate(attempt.proposal).edits,
                         verification_id=token,
                         expected_oracle_digest=oracle_digest,
+                        repair_run_id=run.id,
+                        candidate_ordinal=attempt.ordinal,
                     )
                 return self._verified(principal, task_id, run, attempt, result)
             except Exception:

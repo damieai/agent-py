@@ -66,7 +66,14 @@ class Activities:
                 await asyncio.to_thread(
                     record_segment, self.service, tenant, task_id, span.get_span_context()
                 )
-                result = await self._tick(identity)
+                try:
+                    result = await self._tick(identity)
+                except BaseException:
+                    span.set_attribute("result", "error")
+                    raise
+                from agent_py.observations import worker_result_attributes
+
+                span.set_attributes(worker_result_attributes(result))
                 outcome = (
                     "done"
                     if result.get("done")

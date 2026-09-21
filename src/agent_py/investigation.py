@@ -9,6 +9,7 @@ from agent_py.context import ContextCompiler
 from agent_py.db import Reservation, Task, emit, tenant_get
 from agent_py.domain import DomainError, Principal
 from agent_py.model import AnthropicGateway
+from agent_py.observations import stage
 
 
 class InvestigationHarness:
@@ -106,6 +107,7 @@ class InvestigationHarness:
         artifact = ArtifactStore(service.db, service.settings.artifact_root).put(
             tenant, task_id, "model-analysis", json.dumps(report, sort_keys=True).encode()
         )
+        changed = False
         with service.db.session(tenant) as s:
             current = tenant_get(s, Task, task_id, tenant, True)
             if current.cancelled or current.taken_over or current.status == "TERMINATED":
@@ -115,8 +117,22 @@ class InvestigationHarness:
                     "artifact_id": artifact.id,
                 }
             if current.waiting_reason != "HUMAN_REVIEW":
+                changed = True
                 current.status, current.waiting_reason = "WAITING", "HUMAN_REVIEW"
                 emit(s, current, "investigation.completed", {"artifact_id": artifact.id})
+        with stage(
+            service.telemetry,
+            "investigation.summary",
+            tenant,
+            task_id,
+            **{
+                "stage.workflow": "investigate",
+                "stage.stop_reason": "HUMAN_REVIEW",
+                "stage.rounds": 1,
+                "stage.changed": changed,
+            },
+        ):
+            pass
         # Keep the workflow alive for cancellation/takeover; analysis is not business SUCCESS.
         return {"done": False, "wait": "HUMAN_REVIEW", "artifact_id": artifact.id}
 

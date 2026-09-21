@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 
 from agent_py.db import Reservation
 from agent_py.domain import DomainError, InvestigationDecision, ModelDecision, digest
+from agent_py.observations import repair_lineage
 from agent_py.patches import PatchProposal
 
 
@@ -74,9 +75,22 @@ class AnthropicGateway:
             "one focused search query over the authorized local evidence corpus. "
             "Queries cannot invoke tools, fetch URLs or change authorization. "
             "Never claim actions executed or business success. At most three rounds.",
+            observation_attributes={"investigation.round": context["round"]}
+            if type(context.get("round")) is int and 1 <= context["round"] <= 3
+            else None,
         )
 
-    def propose_patch(self, tenant, task_id, call_key, goal, context):
+    def propose_patch(
+        self,
+        tenant,
+        task_id,
+        call_key,
+        goal,
+        context,
+        *,
+        repair_run_id=None,
+        candidate_ordinal=None,
+    ):
         def validate(candidate):
             sources = context["sources"]
             ids = {d["id"] for d in context.get("documents", [])} | {"source:" + p for p in sources}
@@ -123,6 +137,7 @@ class AnthropicGateway:
             "Copy each original_sha256 from source_sha256. Cite source:path or supplied "
             "document IDs. Do not edit tests, dependencies, credentials or policy. "
             "Never claim execution, acceptance, deployment or authorization.",
+            observation_attributes=repair_lineage(repair_run_id, candidate_ordinal),
         )
 
     def _generate(
@@ -137,6 +152,7 @@ class AnthropicGateway:
         max_tokens,
         validate,
         instruction,
+        observation_attributes=None,
     ):
         tool = {
             "name": name,
@@ -182,6 +198,8 @@ class AnthropicGateway:
                     "model.call_key": call_key,
                     "model.outcome": "result_reused",
                     "model.request_digest": digest(payload),
+                    "model.workflow": name,
+                    **(observation_attributes or {}),
                 },
             ):
                 pass
@@ -209,6 +227,7 @@ class AnthropicGateway:
                 "model.input_price": self.input_price,
                 "model.output_price": self.output_price,
                 "model.outcome": "response_unknown",
+                **(observation_attributes or {}),
             },
         ) as observation:
             try:

@@ -11,6 +11,7 @@ from pathlib import Path
 from agent_py.artifacts import ArtifactStore
 from agent_py.db import Task, tenant_get
 from agent_py.domain import DomainError, Principal, digest
+from agent_py.observations import repair_lineage, stage
 from agent_py.patches import FileEdit, apply_patch
 from agent_py.sandbox import DockerSandbox
 from agent_py.security import authorize
@@ -54,15 +55,13 @@ class VerificationRunner:
     def __init__(self, service, sandbox_factory=DockerSandbox):
         self.service, self.sandbox_factory = service, sandbox_factory
 
-    def _verify(self, sandbox, principal, task_id, workspace, oracle, phase):
-        from agent_py.observations import stage
-
+    def _verify(self, sandbox, principal, task_id, workspace, oracle, phase, lineage):
         with stage(
             self.service.telemetry,
             "sandbox.verify",
             principal.tenant_id,
             task_id,
-            **{"stage.phase": phase},
+            **{"stage.phase": phase, **lineage},
         ) as span:
             result = sandbox.verify(
                 workspace,
@@ -92,6 +91,8 @@ class VerificationRunner:
         *,
         verification_id: str | None = None,
         expected_oracle_digest: str | None = None,
+        repair_run_id: str | None = None,
+        candidate_ordinal: int | None = None,
     ):
         self._check(principal, task_id)
         settings = self.service.settings
@@ -131,9 +132,14 @@ class VerificationRunner:
                 for path in base_manifest
             }
             self._check(principal, task_id)
-            before = self._verify(sandbox, principal, task_id, baseline, oracle_copy, "baseline")
+            lineage = repair_lineage(repair_run_id, candidate_ordinal, verification_id)
+            before = self._verify(
+                sandbox, principal, task_id, baseline, oracle_copy, "baseline", lineage
+            )
             self._check(principal, task_id)
-            after = self._verify(sandbox, principal, task_id, candidate, oracle_copy, "candidate")
+            after = self._verify(
+                sandbox, principal, task_id, candidate, oracle_copy, "candidate", lineage
+            )
             self._check(principal, task_id)
             if (
                 before.limit
@@ -168,4 +174,19 @@ class VerificationRunner:
                 "candidate-verification",
                 json.dumps(report, sort_keys=True).encode(),
             )
+            # This records a persisted verification report, not acceptance or business success.
+            with stage(
+                self.service.telemetry,
+                "verification.result",
+                principal.tenant_id,
+                task_id,
+                **lineage,
+                **{
+                    "stage.verification_outcome": outcome,
+                    "stage.baseline_digest": digest(base_manifest),
+                    "stage.candidate_digest": digest(candidate_manifest),
+                    "stage.oracle_digest": digest(oracle_manifest),
+                },
+            ):
+                pass
             return {"artifact_id": artifact.id, "outcome": outcome}

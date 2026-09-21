@@ -9,6 +9,7 @@ from agent_py.context import ContextBundle, ContextCompiler
 from agent_py.db import InvestigationRound, Reservation, Task, emit, now, tenant_get, uid
 from agent_py.domain import DomainError, Principal
 from agent_py.model import AnthropicGateway
+from agent_py.observations import stage
 from agent_py.repair import insert_once
 
 MAX_ROUNDS = 3
@@ -178,10 +179,12 @@ class BoundedInvestigation:
         artifact = ArtifactStore(service.db, service.settings.artifact_root).put(
             tenant, task_id, "model-analysis", json.dumps(report, sort_keys=True).encode()
         )
+        changed = False
         with service.db.session(tenant) as s:
             current = tenant_get(s, Task, task_id, tenant, True)
             service._executable(s, current)
             if current.waiting_reason != "HUMAN_REVIEW":
+                changed = True
                 current.status, current.waiting_reason = "WAITING", "HUMAN_REVIEW"
                 emit(
                     s,
@@ -193,4 +196,17 @@ class BoundedInvestigation:
                         "stop_reason": reason,
                     },
                 )
+        with stage(
+            service.telemetry,
+            "investigation.summary",
+            tenant,
+            task_id,
+            **{
+                "stage.workflow": "investigation_loop",
+                "stage.stop_reason": reason,
+                "stage.rounds": len(history),
+                "stage.changed": changed,
+            },
+        ):
+            pass
         return {"done": False, "wait": "HUMAN_REVIEW", "artifact_id": artifact.id}

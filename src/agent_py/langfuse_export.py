@@ -11,10 +11,35 @@ from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
 from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 
 from agent_py.observation_policy import pseudonym, selected
+from agent_py.observations import WAIT_REASONS, WORKER_PHASES
 
 NAMES = {"task.accepted", "task.dispatch", "worker.tick", "model.generation", "model.result_reused"}
 NAMES |= {"diagnostic.probe", "diagnostic.child"}
 STAGES = {
+    "worker.tick": {
+        "waiting_reason": WAIT_REASONS,
+        "phase": WORKER_PHASES,
+        "task_result": {"SUCCESS", "FAILED", "CANCELLED"},
+    },
+    "investigation.summary": {
+        "workflow": {"investigate", "investigation_loop"},
+        "stop_reason": {
+            "HUMAN_REVIEW",
+            "MODEL_STOP",
+            "ROUND_LIMIT",
+            "REPEATED_QUERY",
+            "NO_EVIDENCE",
+            "NO_PROGRESS",
+        },
+    },
+    "verification.result": {
+        "verification_outcome": {
+            "REGRESSION_FIXED",
+            "CANDIDATE_FAILED",
+            "BASELINE_NOT_REPRODUCED",
+            "INCONCLUSIVE",
+        },
+    },
     "retrieval.compile": {"strategy": {"lexical", "bm25_rrf"}},
     "tool.read": {
         "provider": {"bitbucket_pr", "jira_issue", "jenkins_build", "kubernetes_deployment"}
@@ -25,6 +50,9 @@ STAGES = {
     },
 }
 STAGE_NUMBERS = {
+    "worker.tick": {},
+    "investigation.summary": {"rounds": (1, 3)},
+    "verification.result": {},
     "retrieval.compile": {
         "document_count": (0, 100_000),
         "omitted_count": (0, 100_000),
@@ -123,6 +151,39 @@ class LangfuseProcessor(SpanProcessor):
         attrs = span.attributes or {}
         tenant, task = attrs["tenant.id"], attrs["task.id"]
         metadata = {"tenant": self.pseudonym(tenant, "tenant", tenant)}
+        if span.name == "worker.tick" and type(attrs.get("stage.blocked")) is bool:
+            metadata["blocked"] = attrs["stage.blocked"]
+        if span.name == "investigation.summary" and type(attrs.get("stage.changed")) is bool:
+            metadata["changed"] = attrs["stage.changed"]
+        if span.name in {"model.generation", "model.result_reused"}:
+            ordinal = attrs.get("investigation.round")
+            if (
+                attrs.get("model.workflow") == "submit_investigation"
+                and type(ordinal) is int
+                and 1 <= ordinal <= 3
+            ):
+                metadata["round"] = ordinal
+        if span.name in {
+            "model.generation",
+            "model.result_reused",
+            "sandbox.verify",
+            "verification.result",
+        }:
+            run = attrs.get("repair.run_id")
+            ordinal = attrs.get("repair.candidate_ordinal")
+            if isinstance(run, str) and 0 < len(run) <= 160:
+                metadata["repair_run_id"] = self.pseudonym(tenant, "repair-run", task + ":" + run)
+                if type(ordinal) is int and 1 <= ordinal <= 3:
+                    metadata["candidate_ordinal"] = ordinal
+                    metadata["candidate_id"] = self.pseudonym(
+                        tenant, "repair-candidate", task + ":" + run + ":" + str(ordinal)
+                    )
+            if span.name in {"sandbox.verify", "verification.result"}:
+                token = attrs.get("verification.id")
+                if isinstance(token, str) and 0 < len(token) <= 160:
+                    metadata["verification_id"] = self.pseudonym(
+                        tenant, "verification", task + ":" + token
+                    )
         if span.name in {"diagnostic.probe", "diagnostic.child"}:
             metadata["synthetic"] = True
         if span.name in TASK_STAGES | {"operation.escalate"}:
@@ -156,6 +217,11 @@ class LangfuseProcessor(SpanProcessor):
                 and re.fullmatch(r"[a-f0-9]{64}", value)
             ):
                 metadata["context_digest"] = value
+        if span.name == "verification.result":
+            for field in ("baseline_digest", "candidate_digest", "oracle_digest"):
+                value = attrs.get("stage." + field)
+                if isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value):
+                    metadata[field] = value
         for field in DIGESTS:
             value = attrs.get("model." + field)
             if isinstance(value, str) and re.fullmatch(r"[a-f0-9]{64}", value):
