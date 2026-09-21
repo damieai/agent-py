@@ -42,6 +42,37 @@ def principal(tenant="demo", subject="developer"):
 
 
 @app.command()
+def langfuse_check(
+    expected_project_id: str = typer.Option(...),
+    allow_network: bool = False,
+    attempts: int = typer.Option(5, min=1, max=10),
+    output_dir: Path = Path(".runtime/langfuse-live"),
+):
+    """Check configuration; --allow-network sends two synthetic spans and reads them back."""
+    import os
+    import tempfile
+
+    from agent_py.langfuse_check import check
+
+    try:
+        settings = get_settings()
+    except Exception:
+        typer.echo("INVALID_CONFIGURATION: check server-side settings", err=True)
+        raise typer.Exit(2) from None
+    report = check(settings, expected_project_id, allow_network=allow_network, attempts=attempts)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    directory = Path(tempfile.mkdtemp(prefix="run-", dir=output_dir))
+    path = directory / "report.json"
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w") as stream:
+        json.dump(report, stream, indent=2)
+        stream.write("\n")
+    typer.echo(f"Langfuse check: {report['status']}; report: {path}")
+    if report["status"] not in {"PASS", "NOT_RUN"}:
+        raise typer.Exit(1)
+
+
+@app.command()
 def init():
     """Initialize development-only schema and the two demo principals."""
     settings = get_settings()

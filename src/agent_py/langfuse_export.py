@@ -13,6 +13,7 @@ from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from agent_py.observation_policy import pseudonym, selected
 
 NAMES = {"task.accepted", "task.dispatch", "worker.tick", "model.generation", "model.result_reused"}
+NAMES |= {"diagnostic.probe", "diagnostic.child"}
 STAGES = {
     "retrieval.compile": {"strategy": {"lexical", "bm25_rrf"}},
     "tool.read": {
@@ -102,6 +103,8 @@ class LangfuseProcessor(SpanProcessor):
         attrs = span.attributes or {}
         tenant, task = attrs["tenant.id"], attrs["task.id"]
         metadata = {"tenant": self.pseudonym(tenant, "tenant", tenant)}
+        if span.name in {"diagnostic.probe", "diagnostic.child"}:
+            metadata["synthetic"] = True
         if span.name in OPERATIONS:
             identifier = attrs.get("operation.id")
             if isinstance(identifier, str) and 0 < len(identifier) <= 160:

@@ -44,7 +44,7 @@ tenant、task session、推理身份使用独立密钥的 HMAC-SHA256 伪名，�
 
 ## 导出与数据边界
 
-允许导出的 span 名仅有 `task.accepted`、`task.dispatch`、`worker.tick`、`model.generation`、`model.result_reused`、`retrieval.compile`、`tool.read`、`sandbox.verify` 及下述五种 `operation.*`，且 instrumentation scope 必须是项目自己的 `agent-py`。应用端只添加选定字段；处理器在排队前重建干净 span，剔除其余属性、事件、未允许的 links、status 文本和资源元数据。
+允许导出的 span 名仅有 `task.accepted`、`task.dispatch`、`worker.tick`、`model.generation`、`model.result_reused`、`retrieval.compile`、`tool.read`、`sandbox.verify`、下述五种 `operation.*` 以及显式联调专用的 `diagnostic.probe` / `diagnostic.child`，且 instrumentation scope 必须是项目自己的 `agent-py`。应用端只添加选定字段；处理器在排队前重建干净 span，剔除其余属性、事件、未允许的 links、status 文本和资源元数据。
 
 不导出任务目标、查询原文、证据正文、源代码、补丁、模型输出、异常信息、headers、原始业务 ID 或凭证。正文摘要不等于内容授权，因此首期不支持 redacted/input-output 模式。其他 exporter（包括本地 JSONL）仍执行各自白名单，不能认为 Langfuse 过滤器会替它们脱敏。
 
@@ -145,10 +145,33 @@ make langfuse-check
 
 单条模式保留为回退配置；它仍使用同一有界队列、脱敏及故障策略。批量发送增加了低流量下的等待时间，并扩大了单次不确定应答影响的 span 数；真实平台吞吐与接收限制仍需实际验收。
 
+## 显式平台回读诊断
+
+完成现有 Langfuse 服务端配置后，可使用以下命令（不会构造 Service、连接业务数据库或调用模型）：
+
+```bash
+# 默认只验证本地配置和可选 SDK，输出 NOT_RUN；不联网
+.venv/bin/agent-py langfuse-check --expected-project-id YOUR_PROJECT_ID
+# 显式授权向配置端点发送两条合成诊断 span，并用同一凭证回读
+.venv/bin/agent-py langfuse-check --expected-project-id YOUR_PROJECT_ID --allow-network
+```
+
+`expected-project-id` 必须由操作者从目标项目取得。联网时先调用 `GET /api/public/projects`，只有恰好返回预期项目才写入；端点或凭证误指其他项目时在上传前失败。要求启用 Langfuse 且 sample_rate=1，命令不悄悄覆盖采样配置。
+
+随后通过实际导出适配器创建 `diagnostic.probe` 根 span 和 `diagnostic.child` 子 span，固定添加 `synthetic=true` 元数据。不伪造 generation、usage、费用或业务动作。OTLP 获得成功应答后，用 Observations API v2 按随机 trace ID 和有限时间范围查询，仅选择 core/basic/metadata，不请求输入输出。
+
+命令核对两个 observation ID、项目、trace、父子关系、会话伪名、环境及 synthetic 标记。只收到成功应答但未能回读时返回 INCOMPLETE，不当作平台验收通过。默认最多查询 5 次，可用 `--attempts` 指定 1—10 次；只有记录尚不完整时每隔 2 秒重查，401/403/429/跳转、异常 schema 或数据不匹配直接失败，不重试上传。GET 响应最多 64 KiB，按块读取并检查 15 秒读取窗口，另有 HTTP I/O timeout；不是整个命令的绝对墙钟终止保证。没有启用代理继承或跟随重定向。
+
+报告写入 `.runtime/langfuse-live/run-*/report.json`，目录权限 0700、文件权限 0600。报告包含项目/端点摘要、随机诊断 trace/span ID、SDK 版本、独立的 ingestion_acknowledged / observations_verified 标记及固定错误代码；不保存密钥、项目名称、响应正文或异常文本。PASS 与离线 NOT_RUN 返回 0，FAIL/INCOMPLETE 返回非零；NOT_RUN 只表示本地检查结束，禁止把它用于宣称平台已验收。
+
+每次显式联网调用都会生成新诊断记录，不自动删除平台数据；保留/删除按项目策略单独处理。此入口验证合成元数据的写入和回读，不验证控制台 links 展示、用户权限隔离、真实模型 usage 或三种业务轨迹。当前只以 MockTransport 对官方协议完成测试，尚未用真实项目凭证运行。
+
+协议依据：[Langfuse Public API](https://langfuse.com/docs/api-and-data-platform/features/public-api)（项目凭证与 Observations v2）、[弃用 API 迁移](https://langfuse.com/faq/all/deprecated-api-migration)。新入口只支持 Observations v2，不自动退回旧 trace API；部署版本需支持该接口。
+
 ## 验证与待办
 
 ```bash
-.venv/bin/pytest tests/test_langfuse.py tests/test_trace_context.py tests/test_stage_observations.py tests/test_operation_observations.py tests/test_langfuse_batching.py -q
+.venv/bin/pytest tests/test_langfuse.py tests/test_trace_context.py tests/test_stage_observations.py tests/test_operation_observations.py tests/test_langfuse_batching.py tests/test_langfuse_check.py -q
 env AGENT_TEST_TEMPORAL=1 .venv/bin/pytest tests/test_trace_context.py -m integration -q
 env AGENT_TEST_POSTGRES=1 .venv/bin/pytest tests/test_postgres.py -q
 ```
